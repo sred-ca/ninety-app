@@ -210,9 +210,9 @@ body {
   color: var(--text);
 }
 
-.stat-card.green .stat-value { color: var(--green); }
+.stat-card.green .stat-value  { color: var(--green); }
 .stat-card.yellow .stat-value { color: var(--yellow); }
-.stat-card.red .stat-value { color: var(--red); }
+.stat-card.red .stat-value    { color: var(--red); }
 .stat-card.accent .stat-value { color: var(--accent); }
 
 /* ── Card (table wrapper) ─────────────────────────────────────────── */
@@ -337,9 +337,9 @@ body {
 .badge-done      { background: var(--blue-bg);   color: var(--blue); }
 .badge-not_started{ background: var(--surface3); color: var(--text2); }
 
-.badge-identified { background: var(--yellow-bg); color: var(--yellow); }
-.badge-discussing { background: var(--blue-bg);   color: var(--blue); }
-.badge-solved     { background: var(--green-bg);  color: var(--green); }
+.badge-in_progress { background: var(--blue-bg);   color: var(--blue); }
+.badge-blocker     { background: var(--red-bg);    color: var(--red); }
+.badge-solved      { background: var(--green-bg);  color: var(--green); }
 
 .badge-high   { background: var(--red-bg);    color: var(--red); }
 .badge-medium { background: var(--yellow-bg); color: var(--yellow); }

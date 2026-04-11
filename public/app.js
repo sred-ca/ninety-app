@@ -438,7 +438,7 @@ function buildIssueCard(issue) {
     </div>
     <div class="issue-card-bottom">
       <div class="issue-meta">
-        <span class="badge badge-${issue.status}">${issue.status}</span>
+        <span class="badge badge-${issue.status}">${issue.status === 'in_progress' ? 'In Progress' : issue.status === 'blocker' ? 'Blocker' : issue.status.replace('_', ' ')}</span>
         <span class="badge badge-${issue.priority}">${issue.priority}</span>
       </div>
       <div class="issue-actions">
@@ -477,16 +477,16 @@ function renderIssues() {
   const empty = qs('#issues-empty');
   grid.innerHTML = '';
 
-  // Stats: exclude archived from counts
+  // Stats: exclude archived from counts; Total excludes solved
   const activeIssues = state.issues.filter(i => !i.archived);
-  const total = activeIssues.length;
-  const identified = activeIssues.filter(i => i.status === 'identified').length;
-  const discussing = activeIssues.filter(i => i.status === 'discussing').length;
-  const solved = activeIssues.filter(i => i.status === 'solved').length;
+  const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
+  const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
+  const solved     = activeIssues.filter(i => i.status === 'solved').length;
+  const total      = inProgress + blockers; // all open (non-solved) issues
   qs('#issues-stats').innerHTML = `
-    <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
-    <div class="stat-card yellow"><span class="stat-label">Identified</span><span class="stat-value">${identified}</span></div>
-    <div class="stat-card accent"><span class="stat-label">Discussing</span><span class="stat-value">${discussing}</span></div>
+    <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
+    <div class="stat-card accent"><span class="stat-label">In Progress</span><span class="stat-value">${inProgress}</span></div>
+    <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${blockers}</span></div>
     <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
   `;
 
@@ -594,7 +594,7 @@ function openIssueModal(editId) {
   qs('#issue-title').value = issue ? issue.title : '';
   qs('#issue-description').value = issue ? (issue.description || '') : '';
   qs('#issue-priority').value = issue ? issue.priority : 'medium';
-  qs('#issue-status').value = issue ? issue.status : 'identified';
+  qs('#issue-status').value = issue ? issue.status : 'in_progress';
   qs('#issue-status-group').style.display = issue ? 'flex' : 'none';
 
   // Due date: existing value or default to 5 business days from today

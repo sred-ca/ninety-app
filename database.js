@@ -47,7 +47,7 @@ if (USE_PG) {
         title       TEXT NOT NULL,
         description TEXT,
         owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        status      TEXT NOT NULL DEFAULT 'identified',
+        status      TEXT NOT NULL DEFAULT 'in_progress',
         priority    TEXT NOT NULL DEFAULT 'medium',
         archived    BOOLEAN NOT NULL DEFAULT FALSE,
         due_date    DATE,
@@ -65,6 +65,11 @@ if (USE_PG) {
     await pool.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
+    `);
+    // Rename legacy statuses to new names
+    await pool.query(`
+      UPDATE issues SET status='in_progress' WHERE status='identified';
+      UPDATE issues SET status='blocker'     WHERE status='discussing';
     `);
 
     // Seed default users on first run
@@ -304,7 +309,7 @@ if (USE_PG) {
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
     create: async ({ title, description, owner_id, priority, due_date }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
-        owner_id: owner_id ? +owner_id : null, status: 'identified', priority: priority || 'medium',
+        owner_id: owner_id ? +owner_id : null, status: 'in_progress', priority: priority || 'medium',
         archived: false, due_date: due_date || null, created_at: nowStr(), updated_at: nowStr() };
       db.issues.push(issue); persist(db); return enrichIssue(issue);
     },
