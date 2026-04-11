@@ -178,7 +178,10 @@ if (USE_PG) {
 
   const fs   = require('fs');
   const path = require('path');
-  const DATA_FILE = path.join(__dirname, 'data.json');
+  // Use /tmp on serverless (read-only app dir), fall back to __dirname locally
+  const DATA_FILE = process.env.VERCEL
+    ? '/tmp/ninety-data.json'
+    : path.join(__dirname, 'data.json');
 
   const SEED = {
     _seq: { users: 5, rocks: 0, issues: 0 },
