@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { initDb, userQueries, rockQueries, issueQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -64,6 +64,38 @@ app.post('/api/issues/:id/vote', wrap(async (req, res) => {
   const { user_id } = req.body;
   if (!user_id) return fail(res, 'user_id is required');
   ok(res, await issueQueries.vote(req.params.id, user_id));
+}));
+
+// Agendas — sections routes before /:id
+app.get('/api/agendas', wrap(async (req, res) => ok(res, await agendaQueries.getAll())));
+app.post('/api/agendas', wrap(async (req, res) => {
+  const { title } = req.body;
+  if (!title) return fail(res, 'title is required');
+  ok(res, await agendaQueries.create({ title }));
+}));
+app.get('/api/agendas/:id/sections', wrap(async (req, res) => ok(res, await agendaQueries.getSections(req.params.id))));
+app.post('/api/agendas/:id/sections', wrap(async (req, res) => {
+  ok(res, await agendaQueries.addSection(req.params.id, req.body));
+}));
+app.put('/api/agendas/:id', wrap(async (req, res) => ok(res, await agendaQueries.update(req.params.id, req.body))));
+app.delete('/api/agendas/:id', wrap(async (req, res) => {
+  await agendaQueries.delete(req.params.id); ok(res, { deleted: true });
+}));
+app.put('/api/agenda-sections/:id', wrap(async (req, res) => ok(res, await agendaQueries.updateSection(req.params.id, req.body))));
+app.delete('/api/agenda-sections/:id', wrap(async (req, res) => {
+  await agendaQueries.deleteSection(req.params.id); ok(res, { deleted: true });
+}));
+
+// Meetings
+app.get('/api/meetings', wrap(async (req, res) => ok(res, await meetingQueries.getAll(req.query.status))));
+app.post('/api/meetings', wrap(async (req, res) => {
+  const { agenda_id, title, scheduled_at, sections_snapshot } = req.body;
+  if (!title) return fail(res, 'title is required');
+  ok(res, await meetingQueries.create({ agenda_id, title, scheduled_at, sections_snapshot }));
+}));
+app.put('/api/meetings/:id', wrap(async (req, res) => ok(res, await meetingQueries.update(req.params.id, req.body))));
+app.delete('/api/meetings/:id', wrap(async (req, res) => {
+  await meetingQueries.delete(req.params.id); ok(res, { deleted: true });
 }));
 
 // SPA catch-all

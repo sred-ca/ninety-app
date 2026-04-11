@@ -60,6 +60,33 @@ if (USE_PG) {
         user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         PRIMARY KEY (issue_id, user_id)
       );
+
+      CREATE TABLE IF NOT EXISTS agendas (
+        id         SERIAL PRIMARY KEY,
+        title      TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS agenda_sections (
+        id               SERIAL PRIMARY KEY,
+        agenda_id        INTEGER NOT NULL REFERENCES agendas(id) ON DELETE CASCADE,
+        name             TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 5,
+        visible          BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order       INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS meetings (
+        id                SERIAL PRIMARY KEY,
+        agenda_id         INTEGER REFERENCES agendas(id) ON DELETE SET NULL,
+        title             TEXT NOT NULL,
+        scheduled_at      TIMESTAMPTZ,
+        started_at        TIMESTAMPTZ,
+        ended_at          TIMESTAMPTZ,
+        status            TEXT NOT NULL DEFAULT 'upcoming',
+        sections_snapshot JSONB,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
     // Migrate existing tables that may lack newer columns
     await pool.query(`
@@ -193,7 +220,55 @@ if (USE_PG) {
       (await pool.query('SELECT issue_id FROM issue_votes WHERE user_id=$1', [userId])).rows.map(r => r.issue_id),
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries };
+  const agendaQueries = {
+    getAll: async () => (await pool.query('SELECT * FROM agendas ORDER BY created_at DESC')).rows,
+    getById: async (id) => (await pool.query('SELECT * FROM agendas WHERE id=$1', [id])).rows[0] ?? null,
+    getSections: async (id) => (await pool.query(
+      'SELECT * FROM agenda_sections WHERE agenda_id=$1 ORDER BY sort_order ASC, id ASC', [id]
+    )).rows,
+    create: async ({ title }) => (await pool.query('INSERT INTO agendas (title) VALUES ($1) RETURNING *', [title])).rows[0],
+    update: async (id, { title }) => (await pool.query('UPDATE agendas SET title=$1 WHERE id=$2 RETURNING *', [title, id])).rows[0] ?? null,
+    delete: async (id) => pool.query('DELETE FROM agendas WHERE id=$1', [id]),
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order }) => (await pool.query(
+      'INSERT INTO agenda_sections (agenda_id,name,duration_minutes,visible,sort_order) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [agendaId, name, duration_minutes ?? 5, visible !== false, sort_order ?? 0]
+    )).rows[0],
+    updateSection: async (id, fields) => {
+      const allowed = ['name','duration_minutes','visible','sort_order'];
+      const keys = allowed.filter(k => k in fields);
+      if (!keys.length) return null;
+      const sets = keys.map((k,i) => `${k}=$${i+1}`).join(', ');
+      return (await pool.query(`UPDATE agenda_sections SET ${sets} WHERE id=$${keys.length+1} RETURNING *`,
+        [...keys.map(k => fields[k]), id])).rows[0] ?? null;
+    },
+    deleteSection: async (id) => pool.query('DELETE FROM agenda_sections WHERE id=$1', [id]),
+  };
+
+  const meetingQueries = {
+    getAll: async (status) => {
+      const q = status
+        ? await pool.query('SELECT * FROM meetings WHERE status=$1 ORDER BY COALESCE(scheduled_at,created_at) DESC', [status])
+        : await pool.query('SELECT * FROM meetings ORDER BY COALESCE(scheduled_at,created_at) DESC');
+      return q.rows;
+    },
+    getById: async (id) => (await pool.query('SELECT * FROM meetings WHERE id=$1', [id])).rows[0] ?? null,
+    create: async ({ agenda_id, title, scheduled_at, sections_snapshot }) => (await pool.query(
+      'INSERT INTO meetings (agenda_id,title,scheduled_at,sections_snapshot) VALUES ($1,$2,$3,$4) RETURNING *',
+      [agenda_id || null, title, scheduled_at || null, sections_snapshot ? JSON.stringify(sections_snapshot) : null]
+    )).rows[0],
+    update: async (id, fields) => {
+      const allowed = ['title','scheduled_at','started_at','ended_at','status','sections_snapshot'];
+      const keys = allowed.filter(k => k in fields);
+      if (!keys.length) return meetingQueries.getById(id);
+      const sets = keys.map((k,i) => `${k}=$${i+1}`).join(', ');
+      await pool.query(`UPDATE meetings SET ${sets} WHERE id=$${keys.length+1}`,
+        [...keys.map(k => k === 'sections_snapshot' && fields[k] != null ? JSON.stringify(fields[k]) : fields[k]), id]);
+      return meetingQueries.getById(id);
+    },
+    delete: async (id) => pool.query('DELETE FROM meetings WHERE id=$1', [id]),
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
 
 } else {
 
@@ -336,5 +411,60 @@ if (USE_PG) {
       db.issue_votes.filter(v => v.user_id === +userId).map(v => v.issue_id),
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries };
+  if (!db.agendas)       { db.agendas = []; }
+  if (!db.agenda_sections) { db.agenda_sections = []; }
+  if (!db.meetings)      { db.meetings = []; }
+  if (!db._seq.agendas)  { db._seq.agendas = 0; }
+  if (!db._seq.agenda_sections) { db._seq.agenda_sections = 0; }
+  if (!db._seq.meetings) { db._seq.meetings = 0; }
+  persist(db);
+
+  const agendaQueries = {
+    getAll: async () => [...db.agendas].sort((a,b) => b.created_at.localeCompare(a.created_at)),
+    getById: async (id) => db.agendas.find(a => a.id === +id) ?? null,
+    getSections: async (id) => db.agenda_sections.filter(s => s.agenda_id === +id).sort((a,b) => a.sort_order - b.sort_order || a.id - b.id),
+    create: async ({ title }) => {
+      const a = { id: nextId('agendas'), title, created_at: nowStr() };
+      db.agendas.push(a); persist(db); return a;
+    },
+    update: async (id, { title }) => {
+      const a = db.agendas.find(a => a.id === +id); if (!a) return null;
+      a.title = title; persist(db); return a;
+    },
+    delete: async (id) => {
+      db.agendas = db.agendas.filter(a => a.id !== +id);
+      db.agenda_sections = db.agenda_sections.filter(s => s.agenda_id !== +id);
+      persist(db);
+    },
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order }) => {
+      const s = { id: nextId('agenda_sections'), agenda_id: +agendaId, name, duration_minutes: duration_minutes ?? 5, visible: visible !== false, sort_order: sort_order ?? 0 };
+      db.agenda_sections.push(s); persist(db); return s;
+    },
+    updateSection: async (id, fields) => {
+      const s = db.agenda_sections.find(s => s.id === +id); if (!s) return null;
+      ['name','duration_minutes','visible','sort_order'].forEach(k => { if (k in fields) s[k] = fields[k]; });
+      persist(db); return s;
+    },
+    deleteSection: async (id) => { db.agenda_sections = db.agenda_sections.filter(s => s.id !== +id); persist(db); },
+  };
+
+  const meetingQueries = {
+    getAll: async (status) => {
+      const list = status ? db.meetings.filter(m => m.status === status) : [...db.meetings];
+      return list.sort((a,b) => (b.scheduled_at||b.created_at).localeCompare(a.scheduled_at||a.created_at));
+    },
+    getById: async (id) => db.meetings.find(m => m.id === +id) ?? null,
+    create: async ({ agenda_id, title, scheduled_at, sections_snapshot }) => {
+      const m = { id: nextId('meetings'), agenda_id: agenda_id || null, title, scheduled_at: scheduled_at || null, started_at: null, ended_at: null, status: 'upcoming', sections_snapshot: sections_snapshot || null, created_at: nowStr() };
+      db.meetings.push(m); persist(db); return m;
+    },
+    update: async (id, fields) => {
+      const m = db.meetings.find(m => m.id === +id); if (!m) return null;
+      ['title','scheduled_at','started_at','ended_at','status','sections_snapshot'].forEach(k => { if (k in fields) m[k] = fields[k]; });
+      persist(db); return m;
+    },
+    delete: async (id) => { db.meetings = db.meetings.filter(m => m.id !== +id); persist(db); },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
 }

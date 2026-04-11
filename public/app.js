@@ -8,7 +8,25 @@ const state = {
   currentView: 'rocks',
   quarterFilter: '',
   issueStatusFilter: '',
+  issueOwnerFilter: '',
   pendingDelete: null,
+  // Meetings
+  agendas: [],
+  meetings: [],
+  meetingsSubTab: 'upcoming',
+  currentAgendaId: null,  // null = list view, number = editing that agenda
+  currentAgendaSections: [],
+  runner: {
+    active: false,
+    meetingId: null,
+    title: '',
+    sections: [],       // visible sections only
+    sectionIdx: 0,
+    sectionElapsed: 0,  // seconds into current section
+    totalElapsed: 0,    // total seconds elapsed
+    playing: false,
+    interval: null,
+  },
 };
 
 /* ── API ─────────────────────────────────────────────────────────── */
@@ -118,6 +136,7 @@ function closeModal(id) { qs(`#${id}`).classList.remove('active'); }
 async function loadUsers() {
   state.users = await api.get('/api/users');
   renderUserPicker();
+  renderIssueOwnerFilter();
 }
 
 function renderUserPicker() {
@@ -190,6 +209,7 @@ qsa('.nav-item').forEach(btn => {
     qsa('.view').forEach(v => v.classList.remove('active'));
     qs(`#view-${view}`).classList.add('active');
     state.currentView = view;
+    if (view === 'meetings') loadMeetings();
   });
 });
 
@@ -472,12 +492,26 @@ function buildIssueCard(issue) {
   return card;
 }
 
+function renderIssueOwnerFilter() {
+  const sel = qs('#issue-owner-filter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Owners</option>' +
+    state.users.map(u => `<option value="${u.id}" ${cur == u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+  sel.value = cur;
+}
+
 function renderIssues() {
   const grid = qs('#issues-list');
   const empty = qs('#issues-empty');
   grid.innerHTML = '';
 
-  // Stats: exclude archived from counts; Total excludes solved
+  // Apply owner filter client-side
+  const ownerFilter = state.issueOwnerFilter ? +state.issueOwnerFilter : null;
+  const filtered = ownerFilter
+    ? state.issues.filter(i => i.owner_id === ownerFilter)
+    : state.issues;
+
+  // Stats: exclude archived from counts; Total excludes solved (use all issues for accurate counts)
   const activeIssues = state.issues.filter(i => !i.archived);
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
   const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
@@ -490,13 +524,13 @@ function renderIssues() {
     <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
   `;
 
-  if (state.issues.length === 0) { empty.classList.remove('hidden'); return; }
+  if (filtered.length === 0) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
   if (state.issueStatusFilter === 'solved') {
     // Solved tab: active solved first, then archived under a divider
-    const activeSolved   = state.issues.filter(i => !i.archived);
-    const archivedSolved = state.issues.filter(i =>  i.archived);
+    const activeSolved   = filtered.filter(i => !i.archived);
+    const archivedSolved = filtered.filter(i =>  i.archived);
 
     if (activeSolved.length === 0 && archivedSolved.length === 0) {
       empty.classList.remove('hidden'); return;
@@ -522,8 +556,7 @@ function renderIssues() {
       archivedSolved.forEach(issue => grid.appendChild(buildIssueCard(issue)));
     }
   } else {
-    // All / Identified / Discussing tabs: server already filtered out archived
-    state.issues.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+    filtered.forEach(issue => grid.appendChild(buildIssueCard(issue)));
   }
 
   // ── Events ────────────────────────────────────────────────────────
@@ -574,10 +607,16 @@ function renderIssues() {
   });
 }
 
+/* Issue owner filter */
+qs('#issue-owner-filter').addEventListener('change', () => {
+  state.issueOwnerFilter = qs('#issue-owner-filter').value;
+  renderIssues();
+});
+
 /* Issue filter tabs */
-qsa('.filter-tab').forEach(tab => {
+qsa('#issue-filter-tabs .filter-tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    qsa('.filter-tab').forEach(t => t.classList.remove('active'));
+    qsa('#issue-filter-tabs .filter-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     state.issueStatusFilter = tab.dataset.status;
     loadIssues();
@@ -646,10 +685,434 @@ qs('#confirm-delete-btn').addEventListener('click', async () => {
   if (!state.pendingDelete) return;
   const { type, id } = state.pendingDelete;
   try {
-    if (type === 'rock') { await api.del(`/api/rocks/${id}`); closeModal('confirm-modal'); loadRocks(); }
-    else if (type === 'issue') { await api.del(`/api/issues/${id}`); closeModal('confirm-modal'); loadIssues(); }
+    if (type === 'rock')    { await api.del(`/api/rocks/${id}`);    closeModal('confirm-modal'); loadRocks(); }
+    else if (type === 'issue')   { await api.del(`/api/issues/${id}`);   closeModal('confirm-modal'); loadIssues(); }
+    else if (type === 'agenda')  { await api.del(`/api/agendas/${id}`);  closeModal('confirm-modal'); loadAgendas(); }
+    else if (type === 'meeting') { await api.del(`/api/meetings/${id}`); closeModal('confirm-modal'); loadMeetings(); }
   } catch (e) { alert(e.message); }
   state.pendingDelete = null;
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   MEETINGS
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Sub-tab switching ───────────────────────────────────────────── */
+qsa('#meetings-subtabs .filter-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    qsa('#meetings-subtabs .filter-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.meetingsSubTab = tab.dataset.mtab;
+    qsa('.meetings-panel').forEach(p => p.classList.add('hidden'));
+    qs(`#meetings-panel-${state.meetingsSubTab}`).classList.remove('hidden');
+  });
+});
+
+/* ── Load all meetings data ──────────────────────────────────────── */
+async function loadMeetings() {
+  [state.agendas, state.meetings] = await Promise.all([
+    api.get('/api/agendas'),
+    api.get('/api/meetings'),
+  ]);
+  renderMeetingsUpcoming();
+  renderMeetingsPast();
+  renderAgendasList();
+  populateAgendaSelects();
+}
+
+async function loadAgendas() {
+  state.agendas = await api.get('/api/agendas');
+  renderAgendasList();
+  populateAgendaSelects();
+}
+
+function populateAgendaSelects() {
+  [qs('#pick-agenda-select'), qs('#schedule-agenda-select')].forEach(sel => {
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = state.agendas.length
+      ? state.agendas.map(a => `<option value="${a.id}">${esc(a.title)}</option>`).join('')
+      : '<option value="">No agendas yet</option>';
+    sel.value = cur;
+  });
+}
+
+/* ── Upcoming meetings ───────────────────────────────────────────── */
+function renderMeetingsUpcoming() {
+  const list = qs('#meetings-upcoming-list');
+  const empty = qs('#meetings-upcoming-empty');
+  const upcoming = state.meetings.filter(m => m.status === 'upcoming');
+  list.innerHTML = '';
+  if (upcoming.length === 0) { empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<div class="table-header" style="grid-template-columns:1fr 200px 120px">
+    <span class="th">Meeting</span><span class="th">Scheduled</span><span class="th"></span>
+  </div>`;
+  const body = document.createElement('div');
+  upcoming.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'table-row';
+    row.style.gridTemplateColumns = '1fr 200px 120px';
+    const agenda = state.agendas.find(a => a.id === m.agenda_id);
+    const when = m.scheduled_at ? new Date(m.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : 'Unscheduled';
+    row.innerHTML = `
+      <div class="rock-title-cell"><div class="rock-title">${esc(m.title)}</div>${agenda ? `<div class="rock-desc">${esc(agenda.title)}</div>` : ''}</div>
+      <div style="color:var(--text2);font-size:13px">${when}</div>
+      <div class="row-actions" style="opacity:1;gap:6px">
+        <button class="btn btn-primary btn-sm start-scheduled-btn" data-id="${m.id}" data-agenda="${m.agenda_id}" data-title="${esc(m.title)}" style="font-size:12px;padding:4px 10px">Start</button>
+        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(m.title)}" title="Delete">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>`;
+    body.appendChild(row);
+  });
+  card.appendChild(body);
+  list.appendChild(card);
+  qsa('.start-scheduled-btn').forEach(btn => {
+    btn.addEventListener('click', () => startRunner(+btn.dataset.agenda, btn.dataset.title, +btn.dataset.id));
+  });
+  qsa('.delete-meeting-btn').forEach(btn => {
+    btn.addEventListener('click', () => confirmDelete('meeting', btn.dataset.id, btn.dataset.title));
+  });
+}
+
+/* ── Schedule a meeting ──────────────────────────────────────────── */
+qs('#start-meeting-btn').addEventListener('click', () => {
+  populateAgendaSelects();
+  openModal('pick-agenda-modal');
+});
+qs('#confirm-start-meeting-btn').addEventListener('click', async () => {
+  const agendaId = +qs('#pick-agenda-select').value;
+  const agenda = state.agendas.find(a => a.id === agendaId);
+  if (!agenda) return;
+  closeModal('pick-agenda-modal');
+  await startRunner(agendaId, agenda.title, null);
+});
+
+const schedBtn = qs('#schedule-meeting-btn-empty');
+if (schedBtn) schedBtn.addEventListener('click', () => { populateAgendaSelects(); openModal('schedule-meeting-modal'); });
+
+qs('#confirm-schedule-btn').addEventListener('click', async () => {
+  const agendaId = +qs('#schedule-agenda-select').value;
+  const agenda = state.agendas.find(a => a.id === agendaId);
+  const dt = qs('#schedule-datetime').value;
+  if (!agenda) return;
+  await api.post('/api/meetings', {
+    agenda_id: agendaId,
+    title: agenda.title,
+    scheduled_at: dt ? new Date(dt).toISOString() : null,
+    status: 'upcoming',
+  });
+  closeModal('schedule-meeting-modal');
+  loadMeetings();
+});
+
+/* ── Past meetings ───────────────────────────────────────────────── */
+function renderMeetingsPast() {
+  const list = qs('#meetings-past-list');
+  const empty = qs('#meetings-past-empty');
+  const past = state.meetings.filter(m => m.status === 'completed');
+  list.innerHTML = '';
+  if (past.length === 0) { empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<div class="table-header" style="grid-template-columns:1fr 180px 100px 48px">
+    <span class="th">Meeting</span><span class="th">Date</span><span class="th">Duration</span><span class="th"></span>
+  </div>`;
+  const body = document.createElement('div');
+  past.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'table-row';
+    row.style.gridTemplateColumns = '1fr 180px 100px 48px';
+    const when = m.started_at ? new Date(m.started_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+    let dur = '—';
+    if (m.started_at && m.ended_at) {
+      const secs = Math.round((new Date(m.ended_at) - new Date(m.started_at)) / 1000);
+      dur = secs >= 3600 ? `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m` : `${Math.floor(secs/60)}m`;
+    }
+    row.innerHTML = `
+      <div class="rock-title">${esc(m.title)}</div>
+      <div style="color:var(--text2);font-size:13px">${when}</div>
+      <div style="color:var(--text2);font-size:13px">${dur}</div>
+      <div class="row-actions" style="opacity:1">
+        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(m.title)}" title="Delete">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>`;
+    body.appendChild(row);
+  });
+  card.appendChild(body);
+  list.appendChild(card);
+  qsa('.delete-meeting-btn').forEach(btn => {
+    btn.addEventListener('click', () => confirmDelete('meeting', btn.dataset.id, btn.dataset.title));
+  });
+}
+
+/* ── Agendas list ────────────────────────────────────────────────── */
+function renderAgendasList() {
+  const list = qs('#agendas-list');
+  const empty = qs('#agendas-empty');
+  const table = qs('#agendas-table');
+  list.innerHTML = '';
+  if (state.agendas.length === 0) {
+    table.classList.add('hidden');
+    empty.classList.remove('hidden');
+    return;
+  }
+  table.classList.remove('hidden');
+  empty.classList.add('hidden');
+  state.agendas.forEach(a => {
+    const row = document.createElement('div');
+    row.className = 'table-row';
+    row.style.gridTemplateColumns = '1fr 120px 80px';
+    // Compute total time from sections if we have them cached
+    row.innerHTML = `
+      <div class="rock-title" style="cursor:pointer">${esc(a.title)}</div>
+      <div style="color:var(--text2);font-size:13px" class="agenda-total-cell" data-id="${a.id}">— min</div>
+      <div class="row-actions" style="opacity:1">
+        <button class="icon-btn edit-agenda-btn" data-id="${a.id}" title="Edit agenda">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="icon-btn danger delete-agenda-btn" data-id="${a.id}" data-title="${esc(a.title)}" title="Delete agenda">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>`;
+    row.querySelector('.rock-title').addEventListener('click', () => openAgendaEditor(a.id));
+    list.appendChild(row);
+    // Load section totals async
+    api.get(`/api/agendas/${a.id}/sections`).then(sections => {
+      const total = sections.reduce((s, sec) => s + sec.duration_minutes, 0);
+      const cell = list.querySelector(`.agenda-total-cell[data-id="${a.id}"]`);
+      if (cell) cell.textContent = total >= 60 ? `${Math.floor(total/60)}h ${total%60}m` : `${total} min`;
+    }).catch(() => {});
+  });
+  qsa('.edit-agenda-btn').forEach(btn => btn.addEventListener('click', () => openAgendaEditor(+btn.dataset.id)));
+  qsa('.delete-agenda-btn').forEach(btn => btn.addEventListener('click', () => confirmDelete('agenda', btn.dataset.id, btn.dataset.title)));
+}
+
+/* ── Create agenda ───────────────────────────────────────────────── */
+qs('#create-agenda-btn').addEventListener('click', async () => {
+  const a = await api.post('/api/agendas', { title: 'New Agenda' });
+  state.agendas.unshift(a);
+  openAgendaEditor(a.id);
+});
+
+/* ── Agenda editor ───────────────────────────────────────────────── */
+async function openAgendaEditor(agendaId) {
+  state.currentAgendaId = agendaId;
+  const agenda = state.agendas.find(a => a.id === agendaId);
+  qs('#agenda-title-input').value = agenda ? agenda.title : '';
+  qs('#agendas-list-view').classList.add('hidden');
+  qs('#agenda-editor').classList.remove('hidden');
+  state.currentAgendaSections = await api.get(`/api/agendas/${agendaId}/sections`);
+  renderAgendaSections();
+}
+
+function renderAgendaSections() {
+  const list = qs('#agenda-sections-list');
+  list.innerHTML = '';
+  const total = state.currentAgendaSections.reduce((s, sec) => s + (sec.duration_minutes || 0), 0);
+  qs('#agenda-total-time').textContent = `Total: ${total >= 60 ? Math.floor(total/60)+'h '+total%60+'m' : total+' min'}`;
+
+  state.currentAgendaSections.forEach((sec, idx) => {
+    const row = document.createElement('div');
+    row.className = 'table-row agenda-section-row';
+    row.style.gridTemplateColumns = '32px 1fr 160px 80px 48px';
+    row.dataset.id = sec.id;
+    row.innerHTML = `
+      <div style="color:var(--text2);font-size:12px;text-align:center">${idx+1}</div>
+      <div><input type="text" class="section-name-input" value="${esc(sec.name)}" placeholder="Section name" style="background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-family:var(--font);font-size:14px;width:100%;padding:2px 4px;outline:none" /></div>
+      <div><input type="number" class="section-dur-input" value="${sec.duration_minutes}" min="1" max="180" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;padding:4px 8px;width:80px;outline:none" /></div>
+      <div style="display:flex;align-items:center">
+        <label class="toggle-switch">
+          <input type="checkbox" class="section-visible-input" ${sec.visible ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div>
+        <button class="icon-btn danger delete-section-btn" data-id="${sec.id}" title="Remove">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>`;
+    // Debounced save on field change
+    const save = async () => {
+      const name = row.querySelector('.section-name-input').value.trim();
+      const dur  = +row.querySelector('.section-dur-input').value || 5;
+      const vis  = row.querySelector('.section-visible-input').checked;
+      if (!name) return;
+      await api.put(`/api/agenda-sections/${sec.id}`, { name, duration_minutes: dur, visible: vis });
+      const s = state.currentAgendaSections.find(s => s.id === sec.id);
+      if (s) { s.name = name; s.duration_minutes = dur; s.visible = vis; }
+      const total2 = state.currentAgendaSections.reduce((s,x) => s + (x.duration_minutes||0), 0);
+      qs('#agenda-total-time').textContent = `Total: ${total2 >= 60 ? Math.floor(total2/60)+'h '+total2%60+'m' : total2+' min'}`;
+    };
+    row.querySelector('.section-name-input').addEventListener('blur', save);
+    row.querySelector('.section-dur-input').addEventListener('change', save);
+    row.querySelector('.section-visible-input').addEventListener('change', save);
+    row.querySelector('.delete-section-btn').addEventListener('click', async () => {
+      await api.del(`/api/agenda-sections/${sec.id}`);
+      state.currentAgendaSections = state.currentAgendaSections.filter(s => s.id !== sec.id);
+      renderAgendaSections();
+    });
+    list.appendChild(row);
+  });
+}
+
+qs('#add-section-btn').addEventListener('click', async () => {
+  const sort = state.currentAgendaSections.length;
+  const sec = await api.post(`/api/agendas/${state.currentAgendaId}/sections`, {
+    name: 'New Section', duration_minutes: 5, visible: true, sort_order: sort,
+  });
+  state.currentAgendaSections.push(sec);
+  renderAgendaSections();
+  // Focus the new name input
+  const inputs = qsa('#agenda-sections-list .section-name-input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+qs('#save-agenda-btn').addEventListener('click', async () => {
+  const title = qs('#agenda-title-input').value.trim() || 'Untitled Agenda';
+  await api.put(`/api/agendas/${state.currentAgendaId}`, { title });
+  const a = state.agendas.find(a => a.id === state.currentAgendaId);
+  if (a) a.title = title;
+  backToAgendasList();
+});
+
+qs('#agenda-back-btn').addEventListener('click', backToAgendasList);
+
+function backToAgendasList() {
+  state.currentAgendaId = null;
+  qs('#agenda-editor').classList.add('hidden');
+  qs('#agendas-list-view').classList.remove('hidden');
+  loadAgendas();
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MEETING RUNNER
+   ════════════════════════════════════════════════════════════════════ */
+function fmtTime(secs) {
+  const s = Math.abs(Math.round(secs));
+  const m = Math.floor(s / 60);
+  const ss = s % 60;
+  return (secs < 0 ? '-' : '') + String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
+}
+
+async function startRunner(agendaId, title, existingMeetingId) {
+  const sections = await api.get(`/api/agendas/${agendaId}/sections`);
+  const visible = sections.filter(s => s.visible);
+  if (visible.length === 0) { alert('This agenda has no visible sections.'); return; }
+
+  // Create or update meeting record
+  let meetingId = existingMeetingId;
+  if (!meetingId) {
+    const m = await api.post('/api/meetings', {
+      agenda_id: agendaId, title, sections_snapshot: visible,
+    });
+    meetingId = m.id;
+  }
+  await api.put(`/api/meetings/${meetingId}`, { status: 'in_progress', started_at: new Date().toISOString() });
+
+  const r = state.runner;
+  r.active = true;
+  r.meetingId = meetingId;
+  r.title = title;
+  r.sections = visible;
+  r.sectionIdx = 0;
+  r.sectionElapsed = 0;
+  r.totalElapsed = 0;
+  r.playing = true;
+
+  qs('#runner-title').textContent = title;
+  qs('#meeting-runner').classList.remove('hidden');
+  renderRunnerSidebar();
+  updateRunnerDisplay();
+
+  // Start interval
+  if (r.interval) clearInterval(r.interval);
+  r.interval = setInterval(() => {
+    if (!r.playing) return;
+    r.sectionElapsed++;
+    r.totalElapsed++;
+    updateRunnerDisplay();
+  }, 1000);
+}
+
+function renderRunnerSidebar() {
+  const r = state.runner;
+  const el = qs('#runner-agenda-items');
+  el.innerHTML = '';
+  r.sections.forEach((sec, idx) => {
+    const item = document.createElement('div');
+    item.className = `runner-agenda-item${idx === r.sectionIdx ? ' active' : ''}${idx < r.sectionIdx ? ' done' : ''}`;
+    item.innerHTML = `
+      <span class="runner-item-num">${idx+1}</span>
+      <span class="runner-item-name">${esc(sec.name)}</span>
+      <span class="runner-item-time">${sec.duration_minutes} MIN</span>`;
+    item.addEventListener('click', () => {
+      r.sectionIdx = idx;
+      r.sectionElapsed = 0;
+      renderRunnerSidebar();
+      updateRunnerDisplay();
+    });
+    el.appendChild(item);
+  });
+}
+
+function updateRunnerDisplay() {
+  const r = state.runner;
+  const sec = r.sections[r.sectionIdx];
+  const allocated = sec.duration_minutes * 60;
+  const remaining = allocated - r.sectionElapsed;
+
+  qs('#runner-total-elapsed').textContent = fmtTime(r.totalElapsed);
+  qs('#runner-section-remaining').textContent = fmtTime(remaining);
+  qs('#runner-section-remaining').style.color = remaining < 0 ? 'var(--red)' : remaining < 60 ? 'var(--yellow)' : '';
+  qs('#runner-section-alloc').textContent = `/ ${sec.duration_minutes} min`;
+  qs('#runner-section-name').textContent = sec.name;
+  qs('#runner-section-number').textContent = `${r.sectionIdx + 1} / ${r.sections.length}`;
+
+  // Progress bar
+  const pct = Math.min(100, (r.sectionElapsed / allocated) * 100);
+  qs('#runner-progress-fill').style.width = pct + '%';
+  qs('#runner-progress-fill').style.background = remaining < 0 ? 'var(--red)' : 'var(--accent)';
+
+  // Play/pause icons
+  qs('#runner-play-icon').classList.toggle('hidden', r.playing);
+  qs('#runner-pause-icon').classList.toggle('hidden', !r.playing);
+}
+
+qs('#runner-playpause-btn').addEventListener('click', () => {
+  state.runner.playing = !state.runner.playing;
+  updateRunnerDisplay();
+});
+
+qs('#runner-prev-btn').addEventListener('click', () => {
+  const r = state.runner;
+  if (r.sectionIdx > 0) { r.sectionIdx--; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); }
+});
+
+qs('#runner-next-btn').addEventListener('click', () => {
+  const r = state.runner;
+  if (r.sectionIdx < r.sections.length - 1) { r.sectionIdx++; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); }
+});
+
+qs('#runner-finish-btn').addEventListener('click', async () => {
+  const r = state.runner;
+  if (r.interval) clearInterval(r.interval);
+  r.playing = false;
+  await api.put(`/api/meetings/${r.meetingId}`, { status: 'completed', ended_at: new Date().toISOString() });
+  qs('#meeting-runner').classList.add('hidden');
+  r.active = false;
+  // Switch to past meetings tab
+  qsa('#meetings-subtabs .filter-tab').forEach(t => t.classList.remove('active'));
+  qs('#meetings-subtabs .filter-tab[data-mtab="past"]').classList.add('active');
+  state.meetingsSubTab = 'past';
+  qsa('.meetings-panel').forEach(p => p.classList.add('hidden'));
+  qs('#meetings-panel-past').classList.remove('hidden');
+  loadMeetings();
 });
 
 /* ── Keyboard shortcuts ──────────────────────────────────────────── */

@@ -50,8 +50,12 @@
           <span>Rocks</span>
         </button>
         <button class="nav-item" data-view="issues">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span>Issues</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>To-Dos</span>
+        </button>
+        <button class="nav-item" data-view="meetings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Meetings</span>
         </button>
       </nav>
 
@@ -103,14 +107,17 @@
         </div>
       </section>
 
-      <!-- ── Issues View ─────────────────────────────────── -->
+      <!-- ── To-Dos View ───────────────────────────────────── -->
       <section id="view-issues" class="view">
         <div class="view-header">
           <div class="view-header-left">
-            <h1>Issues</h1>
-            <p class="view-subtitle">Identify, Discuss, Solve</p>
+            <h1>To-Dos</h1>
+            <p class="view-subtitle">Track, prioritize, and solve</p>
           </div>
           <div class="view-header-right">
+            <select id="issue-owner-filter" class="select-input" style="min-width:130px">
+              <option value="">All Owners</option>
+            </select>
             <div class="filter-tabs" id="issue-filter-tabs">
               <button class="filter-tab active" data-status="">All</button>
               <button class="filter-tab" data-status="in_progress">In Progress</button>
@@ -119,7 +126,7 @@
             </div>
             <button class="btn btn-primary" id="add-issue-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Add Issue
+              Add To-Do
             </button>
           </div>
         </div>
@@ -129,11 +136,193 @@
 
         <div id="issues-list" class="issues-grid"></div>
         <div id="issues-empty" class="empty-state hidden">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <p>No issues here. Drop one in when something needs solving.</p>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <p>No to-dos yet. Add one to get started.</p>
+        </div>
+      </section>
+
+      <!-- ── Meetings View ──────────────────────────────────── -->
+      <section id="view-meetings" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Meetings</h1>
+            <p class="view-subtitle">Run structured, time-boxed meetings</p>
+          </div>
+          <div class="view-header-right">
+            <div class="filter-tabs" id="meetings-subtabs">
+              <button class="filter-tab active" data-mtab="upcoming">Upcoming</button>
+              <button class="filter-tab" data-mtab="past">Past Meetings</button>
+              <button class="filter-tab" data-mtab="agendas">Agendas</button>
+            </div>
+            <button class="btn btn-primary" id="start-meeting-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Start a Meeting
+            </button>
+          </div>
+        </div>
+
+        <!-- Upcoming panel -->
+        <div id="meetings-panel-upcoming" class="meetings-panel">
+          <div id="meetings-upcoming-list"></div>
+          <div id="meetings-upcoming-empty" class="empty-state hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <p>No upcoming meetings. Schedule one or start now.</p>
+            <button class="btn btn-primary" id="schedule-meeting-btn-empty">Schedule a Meeting</button>
+          </div>
+        </div>
+
+        <!-- Past Meetings panel -->
+        <div id="meetings-panel-past" class="meetings-panel hidden">
+          <div id="meetings-past-list"></div>
+          <div id="meetings-past-empty" class="empty-state hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <p>No past meetings yet.</p>
+          </div>
+        </div>
+
+        <!-- Agendas panel -->
+        <div id="meetings-panel-agendas" class="meetings-panel hidden">
+          <!-- List view -->
+          <div id="agendas-list-view">
+            <div class="agendas-list-header">
+              <button class="btn btn-primary" id="create-agenda-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                New Agenda
+              </button>
+            </div>
+            <div class="card" id="agendas-table">
+              <div class="table-header" style="grid-template-columns:1fr 120px 80px">
+                <span class="th">Agenda Name</span>
+                <span class="th">Total Time</span>
+                <span class="th"></span>
+              </div>
+              <div id="agendas-list"></div>
+            </div>
+            <div id="agendas-empty" class="empty-state hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <p>No agendas yet. Create one to run structured meetings.</p>
+            </div>
+          </div>
+
+          <!-- Inline agenda editor -->
+          <div id="agenda-editor" class="hidden">
+            <div class="agenda-editor-header">
+              <button class="btn btn-ghost" id="agenda-back-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><polyline points="15 18 9 12 15 6"/></svg>
+                Back to Agendas
+              </button>
+              <input type="text" id="agenda-title-input" class="agenda-title-input" placeholder="Agenda name..." />
+              <button class="btn btn-primary" id="save-agenda-btn">Save</button>
+            </div>
+            <div class="card agenda-sections-card">
+              <div class="table-header" style="grid-template-columns:32px 1fr 160px 80px 48px">
+                <span class="th"></span>
+                <span class="th">Section Name</span>
+                <span class="th">Duration (minutes)</span>
+                <span class="th">Visible</span>
+                <span class="th"></span>
+              </div>
+              <div id="agenda-sections-list"></div>
+              <div class="agenda-add-section">
+                <button class="btn btn-ghost" id="add-section-btn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add Section
+                </button>
+                <span class="agenda-total-time" id="agenda-total-time">Total: 0 min</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- ── Meeting Runner (full-screen overlay) ─────────────────────── -->
+  <div id="meeting-runner" class="meeting-runner-overlay hidden">
+    <div class="runner-sidebar">
+      <div class="runner-meeting-title" id="runner-title">Meeting</div>
+      <div id="runner-agenda-items" class="runner-agenda-items"></div>
+      <div class="runner-sidebar-footer">
+        <button class="btn btn-danger" id="runner-finish-btn">Finish Meeting</button>
+      </div>
+    </div>
+    <div class="runner-main">
+      <div class="runner-topbar">
+        <div class="runner-timer-block">
+          <span class="runner-timer-label">Total</span>
+          <span id="runner-total-elapsed" class="runner-timer-value">00:00</span>
+        </div>
+        <div class="runner-controls">
+          <button class="icon-btn runner-ctrl-btn" id="runner-prev-btn" title="Previous section">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button class="icon-btn runner-ctrl-btn runner-play-btn" id="runner-playpause-btn" title="Play / Pause">
+            <svg id="runner-play-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <svg id="runner-pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="icon-btn runner-ctrl-btn" id="runner-next-btn" title="Next section">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+        <div class="runner-timer-block runner-section-timer">
+          <span id="runner-section-remaining" class="runner-timer-value runner-section-value">00:00</span>
+          <span class="runner-timer-label" id="runner-section-alloc"></span>
+        </div>
+      </div>
+      <div class="runner-content-area">
+        <div class="runner-section-number" id="runner-section-number">1 / 4</div>
+        <h2 class="runner-section-name" id="runner-section-name">Section</h2>
+        <div class="runner-progress-wrap">
+          <div class="runner-progress-bar">
+            <div id="runner-progress-fill" class="runner-progress-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pick Agenda Modal (to start a meeting) ───────────────────── -->
+  <div id="pick-agenda-modal" class="modal-overlay">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <h3>Start a Meeting</h3>
+        <button class="modal-close" data-modal="pick-agenda-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Choose Agenda</label>
+          <select id="pick-agenda-select" class="select-input"></select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="pick-agenda-modal">Cancel</button>
+        <button class="btn btn-primary" id="confirm-start-meeting-btn">Start Meeting</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Schedule Meeting Modal ──────────────────────────────────── -->
+  <div id="schedule-meeting-modal" class="modal-overlay">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <h3>Schedule a Meeting</h3>
+        <button class="modal-close" data-modal="schedule-meeting-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Agenda</label>
+          <select id="schedule-agenda-select" class="select-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Date &amp; Time</label>
+          <input type="datetime-local" id="schedule-datetime" class="select-input" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="schedule-meeting-modal">Cancel</button>
+        <button class="btn btn-primary" id="confirm-schedule-btn">Schedule</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── Rock Modal ─────────────────────────────────────────────── -->
