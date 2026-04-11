@@ -756,13 +756,14 @@ function renderMeetingsUpcoming() {
     row.className = 'table-row';
     row.style.gridTemplateColumns = '1fr 200px 120px';
     const agenda = state.agendas.find(a => a.id === m.agenda_id);
+    const displayTitle = agenda ? agenda.title : m.title;
     const when = m.scheduled_at ? new Date(m.scheduled_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : 'Unscheduled';
     row.innerHTML = `
-      <div class="rock-title-cell"><div class="rock-title">${esc(m.title)}</div>${agenda ? `<div class="rock-desc">${esc(agenda.title)}</div>` : ''}</div>
+      <div class="rock-title-cell"><div class="rock-title">${esc(displayTitle)}</div></div>
       <div style="color:var(--text2);font-size:13px">${when}</div>
       <div class="row-actions" style="opacity:1;gap:6px">
-        <button class="btn btn-primary btn-sm start-scheduled-btn" data-id="${m.id}" data-agenda="${m.agenda_id}" data-title="${esc(m.title)}" style="font-size:12px;padding:4px 10px">Start</button>
-        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(m.title)}" title="Delete">
+        <button class="btn btn-primary btn-sm start-scheduled-btn" data-id="${m.id}" data-agenda="${m.agenda_id}" data-title="${esc(displayTitle)}" style="font-size:12px;padding:4px 10px">Start</button>
+        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(displayTitle)}" title="Delete">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
       </div>`;
@@ -827,6 +828,8 @@ function renderMeetingsPast() {
     const row = document.createElement('div');
     row.className = 'table-row';
     row.style.gridTemplateColumns = '1fr 180px 100px 48px';
+    const pastAgenda = state.agendas.find(a => a.id === m.agenda_id);
+    const pastTitle = pastAgenda ? pastAgenda.title : m.title;
     const when = m.started_at ? new Date(m.started_at).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
     let dur = '—';
     if (m.started_at && m.ended_at) {
@@ -834,11 +837,11 @@ function renderMeetingsPast() {
       dur = secs >= 3600 ? `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m` : `${Math.floor(secs/60)}m`;
     }
     row.innerHTML = `
-      <div class="rock-title">${esc(m.title)}</div>
+      <div class="rock-title">${esc(pastTitle)}</div>
       <div style="color:var(--text2);font-size:13px">${when}</div>
       <div style="color:var(--text2);font-size:13px">${dur}</div>
       <div class="row-actions" style="opacity:1">
-        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(m.title)}" title="Delete">
+        <button class="icon-btn danger delete-meeting-btn" data-id="${m.id}" data-title="${esc(pastTitle)}" title="Delete">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
       </div>`;
