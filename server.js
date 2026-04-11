@@ -65,41 +65,56 @@ app.get('/auth/google', (req, res) => {
 });
 
 // Step 2 — handle callback
-app.get('/auth/google/callback', wrap(async (req, res) => {
+app.get('/auth/google/callback', async (req, res) => {
   const { code, error } = req.query;
   if (error || !code) return res.redirect('/?error=cancelled');
 
-  // Exchange code → tokens
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id:     GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri:  GOOGLE_REDIRECT_URI,
-      grant_type:    'authorization_code',
-    }),
-  });
-  const tokens = await tokenRes.json();
-  if (!tokens.access_token) return res.redirect('/?error=token_exchange');
+  try {
+    // Exchange code → tokens
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id:     GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri:  GOOGLE_REDIRECT_URI,
+        grant_type:    'authorization_code',
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) {
+      console.error('Token exchange failed:', JSON.stringify(tokens));
+      return res.redirect('/?error=token_exchange');
+    }
 
-  // Get Google profile
-  const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
-  const profile = await profileRes.json();
+    // Get Google profile
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const profile = await profileRes.json();
+    console.log('OAuth profile:', profile.email);
 
-  // Enforce @sred.ca domain
-  if (!profile.email || !profile.email.endsWith(`@${ALLOWED_DOMAIN}`)) {
-    return res.redirect('/?error=unauthorized');
+    // Enforce @sred.ca domain
+    if (!profile.email || !profile.email.endsWith(`@${ALLOWED_DOMAIN}`)) {
+      console.error('Unauthorized email:', profile.email);
+      return res.redirect('/?error=unauthorized');
+    }
+
+    // Find or create user in DB
+    const user = await userQueries.findOrCreateByEmail(profile.email, profile.name);
+    req.session.userId = user.id;
+
+    // Explicitly save session before redirecting (critical in serverless)
+    req.session.save((err) => {
+      if (err) console.error('Session save error:', err);
+      res.redirect('/');
+    });
+  } catch (e) {
+    console.error('OAuth callback error:', e);
+    res.redirect('/?error=server_error');
   }
-
-  // Find or create user in DB
-  const user = await userQueries.findOrCreateByEmail(profile.email, profile.name);
-  req.session.userId = user.id;
-  res.redirect('/');
-}));
+});
 
 // Who am I?
 app.get('/api/me', wrap(async (req, res) => {
