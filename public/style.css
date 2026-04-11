@@ -393,6 +393,53 @@ body {
   box-shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 .issue-card.solved { opacity: 0.6; }
+.issue-card.archived {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+  border-style: dashed;
+}
+.issue-card.archived:hover {
+  opacity: 0.65;
+  border-color: var(--border2);
+  box-shadow: none;
+}
+
+/* ── Archived Section Divider ─────────────────────────────────────── */
+.archived-section-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+
+.archived-header-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.archived-header-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  white-space: nowrap;
+}
+
+.archived-header-label svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
 
 .issue-card-top {
   display: flex;

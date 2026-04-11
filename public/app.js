@@ -347,15 +347,88 @@ async function loadIssues() {
   renderIssues();
 }
 
+/* Build a single issue card DOM element */
+function buildIssueCard(issue) {
+  const isArchived = !!issue.archived;
+  const card = document.createElement('div');
+  card.className = `issue-card ${issue.status === 'solved' ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+
+  const voted = state.userVotes.includes(issue.id);
+
+  // Archive button: shown on solved, non-archived cards
+  const archiveBtn = (issue.status === 'solved' && !isArchived)
+    ? `<button class="icon-btn archive-issue-btn" data-id="${issue.id}" title="Archive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="21 8 21 21 3 21 3 8"/>
+          <rect x="1" y="3" width="22" height="5"/>
+          <line x1="10" y1="12" x2="14" y2="12"/>
+        </svg>
+       </button>`
+    : '';
+
+  // Unarchive button: shown only on archived cards
+  const unarchiveBtn = isArchived
+    ? `<button class="icon-btn unarchive-issue-btn" data-id="${issue.id}" title="Unarchive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="21 8 21 21 3 21 3 8"/>
+          <rect x="1" y="3" width="22" height="5"/>
+          <polyline points="10 12 12 10 14 12"/>
+        </svg>
+       </button>`
+    : '';
+
+  card.innerHTML = `
+    <div class="issue-card-top">
+      <div class="issue-priority-dot ${issue.priority}"></div>
+      <div class="issue-title">${esc(issue.title)}</div>
+    </div>
+    ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
+    <div class="issue-card-bottom">
+      <div class="issue-meta">
+        ${issue.owner_name ? `<span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)"></span>` : ''}
+        <span class="badge badge-${issue.status}">${issue.status}</span>
+        <span class="badge badge-${issue.priority}">${issue.priority}</span>
+      </div>
+      <div class="issue-actions">
+        ${!isArchived ? `<button class="vote-btn ${voted ? 'voted' : ''}" data-id="${issue.id}" title="${voted ? 'Remove vote' : 'Vote to prioritize'}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+          ${issue.votes}
+        </button>` : ''}
+        ${!isArchived ? `<button class="icon-btn edit-issue-btn" data-id="${issue.id}" title="Edit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>` : ''}
+        ${archiveBtn}
+        ${unarchiveBtn}
+        ${!isArchived ? `<button class="icon-btn danger delete-issue-btn" data-id="${issue.id}" data-title="${esc(issue.title)}" title="Delete">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Inject avatar
+  if (issue.owner_name) {
+    const metaSpan = card.querySelector('.issue-meta > span');
+    if (metaSpan) {
+      metaSpan.prepend(avatar(issue.owner_name, issue.owner_color, 20));
+      metaSpan.append(document.createTextNode(issue.owner_name));
+    }
+  }
+
+  return card;
+}
+
 function renderIssues() {
   const grid = qs('#issues-list');
   const empty = qs('#issues-empty');
   grid.innerHTML = '';
 
-  const total = state.issues.length;
-  const identified = state.issues.filter(i => i.status === 'identified').length;
-  const discussing = state.issues.filter(i => i.status === 'discussing').length;
-  const solved = state.issues.filter(i => i.status === 'solved').length;
+  // Stats: exclude archived from counts
+  const activeIssues = state.issues.filter(i => !i.archived);
+  const total = activeIssues.length;
+  const identified = activeIssues.filter(i => i.status === 'identified').length;
+  const discussing = activeIssues.filter(i => i.status === 'discussing').length;
+  const solved = activeIssues.filter(i => i.status === 'solved').length;
   qs('#issues-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
     <div class="stat-card yellow"><span class="stat-label">Identified</span><span class="stat-value">${identified}</span></div>
@@ -366,52 +439,40 @@ function renderIssues() {
   if (state.issues.length === 0) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
-  state.issues.forEach(issue => {
-    const card = document.createElement('div');
-    card.className = `issue-card ${issue.status === 'solved' ? 'solved' : ''}`;
+  if (state.issueStatusFilter === 'solved') {
+    // Solved tab: active solved first, then archived under a divider
+    const activeSolved   = state.issues.filter(i => !i.archived);
+    const archivedSolved = state.issues.filter(i =>  i.archived);
 
-    const voted = state.userVotes.includes(issue.id);
-
-    card.innerHTML = `
-      <div class="issue-card-top">
-        <div class="issue-priority-dot ${issue.priority}"></div>
-        <div class="issue-title">${esc(issue.title)}</div>
-      </div>
-      ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
-      <div class="issue-card-bottom">
-        <div class="issue-meta">
-          ${issue.owner_name ? `<span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)"></span>` : ''}
-          <span class="badge badge-${issue.status}">${issue.status}</span>
-          <span class="badge badge-${issue.priority}">${issue.priority}</span>
-        </div>
-        <div class="issue-actions">
-          <button class="vote-btn ${voted ? 'voted' : ''}" data-id="${issue.id}" title="${voted ? 'Remove vote' : 'Vote to prioritize'}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-            ${issue.votes}
-          </button>
-          <button class="icon-btn edit-issue-btn" data-id="${issue.id}" title="Edit">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="icon-btn danger delete-issue-btn" data-id="${issue.id}" data-title="${esc(issue.title)}" title="Delete">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          </button>
-        </div>
-      </div>
-    `;
-
-    // Add avatar to meta if owner
-    if (issue.owner_name) {
-      const metaSpan = card.querySelector('.issue-meta > span');
-      if (metaSpan) {
-        metaSpan.prepend(avatar(issue.owner_name, issue.owner_color, 20));
-        metaSpan.append(document.createTextNode(issue.owner_name));
-      }
+    if (activeSolved.length === 0 && archivedSolved.length === 0) {
+      empty.classList.remove('hidden'); return;
     }
 
-    grid.appendChild(card);
-  });
+    activeSolved.forEach(issue => grid.appendChild(buildIssueCard(issue)));
 
-  // Events
+    if (archivedSolved.length > 0) {
+      const divider = document.createElement('div');
+      divider.className = 'archived-section-header';
+      divider.innerHTML = `
+        <div class="archived-header-line"></div>
+        <span class="archived-header-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0">
+            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/>
+            <line x1="10" y1="12" x2="14" y2="12"/>
+          </svg>
+          Archived &middot; ${archivedSolved.length}
+        </span>
+        <div class="archived-header-line"></div>
+      `;
+      grid.appendChild(divider);
+      archivedSolved.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+    }
+  } else {
+    // All / Identified / Discussing tabs: server already filtered out archived
+    state.issues.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+  }
+
+  // ── Events ────────────────────────────────────────────────────────
   qsa('.vote-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -432,6 +493,22 @@ function renderIssues() {
 
   qsa('.delete-issue-btn').forEach(btn => {
     btn.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete('issue', btn.dataset.id, btn.dataset.title); });
+  });
+
+  qsa('.archive-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/issues/${btn.dataset.id}`, { archived: true });
+      loadIssues();
+    });
+  });
+
+  qsa('.unarchive-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/issues/${btn.dataset.id}`, { archived: false });
+      loadIssues();
+    });
   });
 }
 
