@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ninety — Team OS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- ── User Picker Modal ─────────────────────────────────────── -->
+  <div id="user-modal" class="modal-overlay active">
+    <div class="modal-box user-picker-box">
+      <div class="modal-logo">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <rect width="36" height="36" rx="10" fill="#6366f1"/>
+          <text x="18" y="25" text-anchor="middle" font-size="20" fill="white" font-family="Inter,sans-serif" font-weight="700">9</text>
+        </svg>
+        <span>Ninety</span>
+      </div>
+      <h2>Who are you?</h2>
+      <p class="picker-sub">Select your name to get started</p>
+      <div id="user-list" class="user-list"></div>
+      <button class="btn-link" id="add-user-btn">+ Add new team member</button>
+      <div id="add-user-form" class="add-user-form hidden">
+        <input id="new-user-name" type="text" placeholder="Your name" maxlength="40" />
+        <button class="btn btn-primary" id="save-user-btn">Add &amp; Select</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── App Shell ─────────────────────────────────────────────── -->
+  <div id="app" class="app hidden">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <svg width="28" height="28" viewBox="0 0 36 36" fill="none">
+          <rect width="36" height="36" rx="10" fill="#6366f1"/>
+          <text x="18" y="25" text-anchor="middle" font-size="20" fill="white" font-family="Inter,sans-serif" font-weight="700">9</text>
+        </svg>
+        <span class="sidebar-title">Ninety</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="rocks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Rocks</span>
+        </button>
+        <button class="nav-item" data-view="issues">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Issues</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="current-user-btn" id="switch-user-btn">
+          <div class="avatar" id="sidebar-avatar"></div>
+          <span id="sidebar-username"></span>
+          <svg class="switch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+
+      <!-- ── Rocks View ─────────────────────────────────── -->
+      <section id="view-rocks" class="view active">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Rocks</h1>
+            <p class="view-subtitle">90-day priorities for your team</p>
+          </div>
+          <div class="view-header-right">
+            <select id="quarter-filter" class="select-input"></select>
+            <button class="btn btn-primary" id="add-rock-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Rock
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats bar -->
+        <div class="stats-bar" id="rocks-stats"></div>
+
+        <!-- Rocks table -->
+        <div class="card">
+          <div class="table-header">
+            <span class="th">Rock</span>
+            <span class="th">Owner</span>
+            <span class="th">Progress</span>
+            <span class="th">Status</span>
+            <span class="th"></span>
+          </div>
+          <div id="rocks-list" class="table-body"></div>
+          <div id="rocks-empty" class="empty-state hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <p>No rocks yet. Add your first 90-day priority.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Issues View ─────────────────────────────────── -->
+      <section id="view-issues" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Issues</h1>
+            <p class="view-subtitle">Identify, Discuss, Solve</p>
+          </div>
+          <div class="view-header-right">
+            <div class="filter-tabs" id="issue-filter-tabs">
+              <button class="filter-tab active" data-status="">All</button>
+              <button class="filter-tab" data-status="identified">Identified</button>
+              <button class="filter-tab" data-status="discussing">Discussing</button>
+              <button class="filter-tab" data-status="solved">Solved</button>
+            </div>
+            <button class="btn btn-primary" id="add-issue-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Issue
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats bar -->
+        <div class="stats-bar" id="issues-stats"></div>
+
+        <div id="issues-list" class="issues-grid"></div>
+        <div id="issues-empty" class="empty-state hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p>No issues here. Drop one in when something needs solving.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ── Rock Modal ─────────────────────────────────────────────── -->
+  <div id="rock-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="rock-modal-title">Add Rock</h3>
+        <button class="modal-close" data-modal="rock-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rock-id" />
+        <div class="form-group">
+          <label>Rock Title *</label>
+          <input type="text" id="rock-title" placeholder="What needs to be accomplished this quarter?" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="rock-description" rows="3" placeholder="Optional details, measurable outcomes..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Owner</label>
+            <select id="rock-owner" class="select-input">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Quarter</label>
+            <select id="rock-quarter" class="select-input"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Status</label>
+            <select id="rock-status" class="select-input">
+              <option value="not_started">Not Started</option>
+              <option value="on_track">On Track</option>
+              <option value="off_track">Off Track</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Progress: <span id="progress-label">0%</span></label>
+            <input type="range" id="rock-progress" min="0" max="100" value="0" class="range-input" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="rock-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-rock-btn">Save Rock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Issue Modal ─────────────────────────────────────────────── -->
+  <div id="issue-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="issue-modal-title">Add Issue</h3>
+        <button class="modal-close" data-modal="issue-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="issue-id" />
+        <div class="form-group">
+          <label>Issue Title *</label>
+          <input type="text" id="issue-title" placeholder="Describe the issue clearly and concisely" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="issue-description" rows="3" placeholder="More context, background, or what you've already tried..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Owner</label>
+            <select id="issue-owner" class="select-input">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Priority</label>
+            <select id="issue-priority" class="select-input">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" id="issue-status-group">
+          <label>Status</label>
+          <select id="issue-status" class="select-input">
+            <option value="identified">Identified</option>
+            <option value="discussing">Discussing</option>
+            <option value="solved">Solved</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="issue-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-issue-btn">Save Issue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Confirm Delete Modal ───────────────────────────────────── -->
+  <div id="confirm-modal" class="modal-overlay">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <h3>Delete?</h3>
+        <button class="modal-close" data-modal="confirm-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-message">Are you sure you want to delete this item?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="confirm-modal">Cancel</button>
+        <button class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
