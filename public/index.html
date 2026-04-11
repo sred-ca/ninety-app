@@ -221,13 +221,19 @@
             </select>
           </div>
         </div>
-        <div class="form-group" id="issue-status-group">
-          <label>Status</label>
-          <select id="issue-status" class="select-input">
-            <option value="identified">Identified</option>
-            <option value="discussing">Discussing</option>
-            <option value="solved">Solved</option>
-          </select>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Due Date</label>
+            <input type="date" id="issue-due-date" class="select-input" />
+          </div>
+          <div class="form-group" id="issue-status-group" style="display:none">
+            <label>Status</label>
+            <select id="issue-status" class="select-input">
+              <option value="identified">Identified</option>
+              <option value="discussing">Discussing</option>
+              <option value="solved">Solved</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="modal-footer">

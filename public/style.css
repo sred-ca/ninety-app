@@ -497,6 +497,64 @@ body {
   gap: 4px;
 }
 
+/* ── Issue card meta row (due date + owner) ───────────────────────── */
+.issue-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  min-height: 4px; /* keeps spacing even when empty */
+}
+
+/* ── Due date chip ────────────────────────────────────────────────── */
+.due-date-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.due-normal {
+  background: var(--surface2);
+  color: var(--text2);
+  border-color: var(--border);
+}
+
+.due-soon {
+  background: rgba(245,158,11,0.1);
+  color: var(--yellow);
+  border-color: rgba(245,158,11,0.25);
+}
+
+.due-today {
+  background: rgba(245,158,11,0.15);
+  color: var(--yellow);
+  border-color: var(--yellow);
+  font-weight: 700;
+}
+
+.due-overdue {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: rgba(239,68,68,0.3);
+  font-weight: 700;
+}
+
+/* ── Solve (checkmark) button ─────────────────────────────────────── */
+.solve-issue-btn {
+  color: var(--text2);
+}
+.solve-issue-btn:hover {
+  background: var(--green-bg) !important;
+  color: var(--green) !important;
+}
+
 /* Vote button */
 .vote-btn {
   display: flex;
@@ -675,6 +733,7 @@ body {
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 input[type="text"],
+input[type="date"],
 textarea,
 .select-input {
   background: var(--surface2);
@@ -689,9 +748,14 @@ textarea,
   outline: none;
 }
 input[type="text"]:focus,
+input[type="date"]:focus,
 textarea:focus,
 .select-input:focus {
   border-color: var(--accent);
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
 }
 input[type="text"]::placeholder,
 textarea::placeholder {

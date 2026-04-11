@@ -83,6 +83,34 @@ function currentQuarter() {
   return `Q${Math.ceil((now.getMonth() + 1) / 3)} ${now.getFullYear()}`;
 }
 
+/* Add N business days to today, return YYYY-MM-DD string */
+function addBusinessDays(n) {
+  const d = new Date();
+  let added = 0;
+  while (added < n) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+/* Format a YYYY-MM-DD due date for display; returns {text, urgency} */
+function formatDueDate(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const due   = dateStr.slice(0, 10);
+  const [y, m, d] = due.split('-').map(Number);
+  // Format as "Apr 15"
+  const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  if (due < today)  return { text: label, urgency: 'overdue' };
+  if (due === today) return { text: 'Today', urgency: 'today' };
+  // Check if tomorrow
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  if (due === tomorrow.toISOString().slice(0, 10)) return { text: 'Tomorrow', urgency: 'soon' };
+  return { text: label, urgency: 'normal' };
+}
+
 function openModal(id) { qs(`#${id}`).classList.add('active'); }
 function closeModal(id) { qs(`#${id}`).classList.remove('active'); }
 
@@ -350,13 +378,34 @@ async function loadIssues() {
 /* Build a single issue card DOM element */
 function buildIssueCard(issue) {
   const isArchived = !!issue.archived;
+  const isSolved   = issue.status === 'solved';
   const card = document.createElement('div');
-  card.className = `issue-card ${issue.status === 'solved' ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
 
   const voted = state.userVotes.includes(issue.id);
 
+  // Due date chip
+  const due = formatDueDate(issue.due_date);
+  const dueDateHtml = due
+    ? `<div class="due-date-chip due-${due.urgency}">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;flex-shrink:0">
+           <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+         </svg>
+         ${due.text}
+       </div>`
+    : '';
+
+  // Solve (checkmark) button: shown on non-solved, non-archived cards
+  const solveBtn = (!isSolved && !isArchived)
+    ? `<button class="icon-btn solve-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+       </button>`
+    : '';
+
   // Archive button: shown on solved, non-archived cards
-  const archiveBtn = (issue.status === 'solved' && !isArchived)
+  const archiveBtn = (isSolved && !isArchived)
     ? `<button class="icon-btn archive-issue-btn" data-id="${issue.id}" title="Archive">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="21 8 21 21 3 21 3 8"/>
@@ -383,9 +432,12 @@ function buildIssueCard(issue) {
       <div class="issue-title">${esc(issue.title)}</div>
     </div>
     ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
+    <div class="issue-card-meta-row">
+      ${dueDateHtml}
+      ${issue.owner_name ? `<span class="issue-owner-chip"></span>` : ''}
+    </div>
     <div class="issue-card-bottom">
       <div class="issue-meta">
-        ${issue.owner_name ? `<span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)"></span>` : ''}
         <span class="badge badge-${issue.status}">${issue.status}</span>
         <span class="badge badge-${issue.priority}">${issue.priority}</span>
       </div>
@@ -394,6 +446,7 @@ function buildIssueCard(issue) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
           ${issue.votes}
         </button>` : ''}
+        ${solveBtn}
         ${!isArchived ? `<button class="icon-btn edit-issue-btn" data-id="${issue.id}" title="Edit">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>` : ''}
@@ -406,12 +459,13 @@ function buildIssueCard(issue) {
     </div>
   `;
 
-  // Inject avatar
+  // Inject owner avatar
   if (issue.owner_name) {
-    const metaSpan = card.querySelector('.issue-meta > span');
-    if (metaSpan) {
-      metaSpan.prepend(avatar(issue.owner_name, issue.owner_color, 20));
-      metaSpan.append(document.createTextNode(issue.owner_name));
+    const chip = card.querySelector('.issue-owner-chip');
+    if (chip) {
+      chip.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)';
+      chip.prepend(avatar(issue.owner_name, issue.owner_color, 18));
+      chip.append(document.createTextNode(issue.owner_name));
     }
   }
 
@@ -495,6 +549,14 @@ function renderIssues() {
     btn.addEventListener('click', (e) => { e.stopPropagation(); confirmDelete('issue', btn.dataset.id, btn.dataset.title); });
   });
 
+  qsa('.solve-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' });
+      loadIssues();
+    });
+  });
+
   qsa('.archive-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -535,6 +597,11 @@ function openIssueModal(editId) {
   qs('#issue-status').value = issue ? issue.status : 'identified';
   qs('#issue-status-group').style.display = issue ? 'flex' : 'none';
 
+  // Due date: existing value or default to 5 business days from today
+  qs('#issue-due-date').value = issue
+    ? (issue.due_date ? issue.due_date.slice(0, 10) : '')
+    : addBusinessDays(5);
+
   const ownerSel = qs('#issue-owner');
   ownerSel.innerHTML = '<option value="">Unassigned</option>' +
     state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
@@ -552,6 +619,7 @@ qs('#save-issue-btn').addEventListener('click', async () => {
     owner_id: qs('#issue-owner').value || null,
     priority: qs('#issue-priority').value,
     status: qs('#issue-status').value,
+    due_date: qs('#issue-due-date').value || null,
   };
   if (!body.title) { qs('#issue-title').focus(); return; }
   try {

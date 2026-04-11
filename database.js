@@ -50,6 +50,7 @@ if (USE_PG) {
         status      TEXT NOT NULL DEFAULT 'identified',
         priority    TEXT NOT NULL DEFAULT 'medium',
         archived    BOOLEAN NOT NULL DEFAULT FALSE,
+        due_date    DATE,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
@@ -60,9 +61,10 @@ if (USE_PG) {
         PRIMARY KEY (issue_id, user_id)
       );
     `);
-    // Migrate existing tables that may lack the archived column
+    // Migrate existing tables that may lack newer columns
     await pool.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
     `);
 
     // Seed default users on first run
@@ -87,7 +89,7 @@ if (USE_PG) {
   `;
   const ISSUE_Q = `
     SELECT i.id, i.title, i.description, i.owner_id, i.status, i.priority,
-           i.archived, i.created_at, i.updated_at,
+           i.archived, i.due_date, i.created_at, i.updated_at,
            u.name AS owner_name, u.color AS owner_color,
            (SELECT COUNT(*)::int FROM issue_votes iv WHERE iv.issue_id = i.id) AS votes
     FROM issues i LEFT JOIN users u ON i.owner_id = u.id
@@ -142,25 +144,25 @@ if (USE_PG) {
       // All tab / other status tabs: hide archived issues
       if (status === 'solved') {
         const q = await pool.query(
-          `${ISSUE_Q} WHERE i.status='solved' ORDER BY i.archived ASC, votes DESC, i.created_at DESC`
+          `${ISSUE_Q} WHERE i.status='solved' ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`
         );
         return q.rows;
       }
       const q = status
-        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 AND NOT i.archived ORDER BY votes DESC, i.created_at DESC`, [status])
-        : await pool.query(`${ISSUE_Q} WHERE NOT i.archived ORDER BY votes DESC, i.created_at DESC`);
+        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 AND NOT i.archived ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status])
+        : await pool.query(`${ISSUE_Q} WHERE NOT i.archived ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`);
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
-    create: async ({ title, description, owner_id, priority }) => {
+    create: async ({ title, description, owner_id, priority, due_date }) => {
       const { rows } = await pool.query(
-        'INSERT INTO issues (title,description,owner_id,priority) VALUES ($1,$2,$3,$4) RETURNING id',
-        [title, description || null, owner_id || null, priority || 'medium']
+        'INSERT INTO issues (title,description,owner_id,priority,due_date) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+        [title, description || null, owner_id || null, priority || 'medium', due_date || null]
       );
       return issueQueries.getById(rows[0].id);
     },
     update: async (id, fields) => {
-      const allowed = ['title','description','owner_id','status','priority','archived'];
+      const allowed = ['title','description','owner_id','status','priority','archived','due_date'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return issueQueries.getById(id);
       const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
@@ -235,7 +237,7 @@ if (USE_PG) {
   function enrichIssue(i) {
     const o = i.owner_id ? db.users.find(u => u.id === i.owner_id) : null;
     const votes = db.issue_votes.filter(v => v.issue_id === i.id).length;
-    return { ...i, archived: !!i.archived, owner_name: o?.name ?? null, owner_color: o?.color ?? null, votes };
+    return { ...i, archived: !!i.archived, due_date: i.due_date || null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, votes };
   }
 
   const p = v => Promise.resolve(v); // wrap sync results as promises
@@ -280,29 +282,35 @@ if (USE_PG) {
 
   const issueQueries = {
     getAll: async (status) => {
+      const dueCmp = (a, b) => {
+        if (!a.due_date && !b.due_date) return 0;
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+        return a.due_date.localeCompare(b.due_date);
+      };
       // Solved tab: return ALL solved (archived + non-archived), sorted archived last
       if (status === 'solved') {
         return db.issues
           .filter(i => i.status === 'solved')
           .map(enrichIssue)
-          .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
+          .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
       }
       // All tab / other tabs: hide archived
       const list = status
         ? db.issues.filter(i => i.status === status && !i.archived)
         : db.issues.filter(i => !i.archived);
-      return list.map(enrichIssue).sort((a,b) => b.votes - a.votes || b.created_at.localeCompare(a.created_at));
+      return list.map(enrichIssue).sort((a, b) => dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
-    create: async ({ title, description, owner_id, priority }) => {
+    create: async ({ title, description, owner_id, priority, due_date }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, status: 'identified', priority: priority || 'medium',
-        archived: false, created_at: nowStr(), updated_at: nowStr() };
+        archived: false, due_date: due_date || null, created_at: nowStr(), updated_at: nowStr() };
       db.issues.push(issue); persist(db); return enrichIssue(issue);
     },
     update: async (id, fields) => {
       const i = db.issues.find(i => i.id === +id); if (!i) return null;
-      ['title','description','owner_id','status','priority','archived'].forEach(k => { if (k in fields) i[k] = fields[k]; });
+      ['title','description','owner_id','status','priority','archived','due_date'].forEach(k => { if (k in fields) i[k] = fields[k]; });
       if ('owner_id' in fields && fields.owner_id) i.owner_id = +fields.owner_id;
       i.updated_at = nowStr(); persist(db); return enrichIssue(i);
     },
