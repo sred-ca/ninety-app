@@ -51,9 +51,9 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
 app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
 app.get('/api/issues', wrap(async (req, res) => ok(res, await issueQueries.getAll(req.query.status))));
 app.post('/api/issues', wrap(async (req, res) => {
-  const { title, description, owner_id, priority } = req.body;
+  const { title, description, owner_id, priority, due_date } = req.body;
   if (!title) return fail(res, 'title is required');
-  ok(res, await issueQueries.create({ title, description, owner_id, priority }));
+  ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date }));
 }));
 app.put('/api/issues/:id', wrap(async (req, res) => ok(res, await issueQueries.update(req.params.id, req.body))));
 app.delete('/api/issues/:id', wrap(async (req, res) => {
