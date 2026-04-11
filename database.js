@@ -66,10 +66,11 @@ if (USE_PG) {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
     `);
-    // Rename legacy statuses to new names
+    // Rename legacy statuses to new names and fix column default
     await pool.query(`
       UPDATE issues SET status='in_progress' WHERE status='identified';
       UPDATE issues SET status='blocker'     WHERE status='discussing';
+      ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'in_progress';
     `);
 
     // Seed default users on first run
@@ -161,8 +162,8 @@ if (USE_PG) {
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
     create: async ({ title, description, owner_id, priority, due_date }) => {
       const { rows } = await pool.query(
-        'INSERT INTO issues (title,description,owner_id,priority,due_date) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-        [title, description || null, owner_id || null, priority || 'medium', due_date || null]
+        'INSERT INTO issues (title,description,owner_id,status,priority,due_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null]
       );
       return issueQueries.getById(rows[0].id);
     },
