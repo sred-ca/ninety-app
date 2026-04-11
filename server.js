@@ -69,8 +69,12 @@ app.post('/api/issues/:id/vote', wrap(async (req, res) => {
 // SPA catch-all
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Boot
-const dbReady = initDb().catch(e => { console.error('DB init failed:', e.message); process.exit(1); });
+// Boot — on Vercel serverless, don't exit on DB init failure (would crash the function)
+const IS_SERVERLESS = !!process.env.VERCEL;
+const dbReady = initDb().catch(e => {
+  console.error('DB init failed:', e.message);
+  if (!IS_SERVERLESS) process.exit(1);
+});
 
 if (require.main === module) {
   dbReady.then(() => app.listen(PORT, () => console.log(`\n🚀  Ninety App  →  http://localhost:${PORT}\n`)));

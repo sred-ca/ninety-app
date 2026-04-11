@@ -17,6 +17,8 @@ if (USE_PG) {
     ssl: process.env.DATABASE_URL.includes('localhost')
       ? false
       : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
   });
 
   async function initDb() {
