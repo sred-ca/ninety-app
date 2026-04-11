@@ -25,7 +25,8 @@ if (USE_PG) {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id         SERIAL PRIMARY KEY,
-        name       TEXT NOT NULL UNIQUE,
+        name       TEXT NOT NULL,
+        email      TEXT UNIQUE,
         color      TEXT NOT NULL DEFAULT '#6366f1',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
@@ -92,6 +93,7 @@ if (USE_PG) {
     await pool.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
+      ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
     `);
     // Rename legacy statuses to new names and fix column default
     await pool.query(`
@@ -100,20 +102,7 @@ if (USE_PG) {
       ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'in_progress';
     `);
 
-    // Seed default users on first run
-    const { rows } = await pool.query('SELECT COUNT(*)::int AS c FROM users');
-    if (rows[0].c === 0) {
-      const defaults = [
-        ['Logan', '#6366f1'], ['Alex', '#ec4899'], ['Jordan', '#f59e0b'],
-        ['Taylor', '#10b981'], ['Morgan', '#3b82f6'],
-      ];
-      for (const [name, color] of defaults) {
-        await pool.query(
-          'INSERT INTO users (name, color) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-          [name, color]
-        );
-      }
-    }
+    // No seed users — accounts are created via Google OAuth on first login
   }
 
   const ROCK_Q = `
@@ -131,6 +120,7 @@ if (USE_PG) {
   const userQueries = {
     getAll: async () => (await pool.query('SELECT * FROM users ORDER BY name')).rows,
     getById: async (id) => (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0] ?? null,
+    getByEmail: async (email) => (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0] ?? null,
     create: async (name, color) => (await pool.query(
       'INSERT INTO users (name,color) VALUES ($1,$2) RETURNING *', [name, color || '#6366f1']
     )).rows[0],
@@ -138,6 +128,19 @@ if (USE_PG) {
       'UPDATE users SET name=$1,color=$2 WHERE id=$3 RETURNING *', [name, color, id]
     )).rows[0] ?? null,
     delete: async (id) => pool.query('DELETE FROM users WHERE id=$1', [id]),
+    findOrCreateByEmail: async (email, name) => {
+      const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];
+      const existing = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+      if (existing) {
+        // Keep name in sync with Google profile
+        return (await pool.query('UPDATE users SET name=$1 WHERE id=$2 RETURNING *', [name, existing.id])).rows[0];
+      }
+      const count = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0].c;
+      const color = colors[count % colors.length];
+      return (await pool.query(
+        'INSERT INTO users (name,email,color) VALUES ($1,$2,$3) RETURNING *', [name, email, color]
+      )).rows[0];
+    },
   };
 
   const rockQueries = {
@@ -328,6 +331,7 @@ if (USE_PG) {
   const userQueries = {
     getAll:   async () => [...db.users].sort((a,b) => a.name.localeCompare(b.name)),
     getById:  async (id) => db.users.find(u => u.id === +id) ?? null,
+    getByEmail: async (email) => db.users.find(u => u.email === email) ?? null,
     create:   async (name, color) => {
       const user = { id: nextId('users'), name, color: color || '#6366f1', created_at: nowStr() };
       db.users.push(user); persist(db); return user;
@@ -337,6 +341,14 @@ if (USE_PG) {
       u.name = name; u.color = color; persist(db); return u;
     },
     delete: async (id) => { db.users = db.users.filter(u => u.id !== +id); persist(db); },
+    findOrCreateByEmail: async (email, name) => {
+      const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];
+      const existing = db.users.find(u => u.email === email);
+      if (existing) { existing.name = name; persist(db); return existing; }
+      const color = colors[db.users.length % colors.length];
+      const user = { id: nextId('users'), name, email, color, created_at: nowStr() };
+      db.users.push(user); persist(db); return user;
+    },
   };
 
   const rockQueries = {

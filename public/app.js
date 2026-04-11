@@ -132,30 +132,25 @@ function formatDueDate(dateStr) {
 function openModal(id) { qs(`#${id}`).classList.add('active'); }
 function closeModal(id) { qs(`#${id}`).classList.remove('active'); }
 
-/* ── User Picker ─────────────────────────────────────────────────── */
+/* ── Auth / User ─────────────────────────────────────────────────── */
 async function loadUsers() {
   state.users = await api.get('/api/users');
-  renderUserPicker();
   renderIssueOwnerFilter();
 }
 
-function renderUserPicker() {
-  const list = qs('#user-list');
-  list.innerHTML = '';
-  state.users.forEach(u => {
-    const btn = document.createElement('button');
-    btn.className = 'user-list-item';
-    btn.appendChild(avatar(u.name, u.color, 32));
-    btn.appendChild(document.createTextNode(u.name));
-    btn.addEventListener('click', () => selectUser(u));
-    list.appendChild(btn);
-  });
+function showLoginScreen(errorMsg) {
+  qs('#login-screen').classList.remove('hidden');
+  qs('#app').classList.add('hidden');
+  if (errorMsg) {
+    const el = qs('#login-error');
+    el.textContent = errorMsg;
+    el.classList.remove('hidden');
+  }
 }
 
-function selectUser(user) {
+function enterApp(user) {
   state.currentUser = user;
-  localStorage.setItem('ninety_user_id', user.id);
-  closeModal('user-modal');
+  qs('#login-screen').classList.add('hidden');
   qs('#app').classList.remove('hidden');
   updateSidebarUser();
   loadAll();
@@ -163,42 +158,12 @@ function selectUser(user) {
 
 function updateSidebarUser() {
   const u = state.currentUser;
+  if (!u) return;
   const avEl = qs('#sidebar-avatar');
   avEl.style.background = u.color;
   avEl.textContent = initials(u.name);
   qs('#sidebar-username').textContent = u.name;
 }
-
-/* ── Add New User ────────────────────────────────────────────────── */
-qs('#add-user-btn').addEventListener('click', () => {
-  qs('#add-user-form').classList.toggle('hidden');
-  if (!qs('#add-user-form').classList.contains('hidden')) {
-    qs('#new-user-name').focus();
-  }
-});
-
-qs('#save-user-btn').addEventListener('click', async () => {
-  const name = qs('#new-user-name').value.trim();
-  if (!name) return;
-  const colors = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ef4444', '#06b6d4'];
-  const color = colors[state.users.length % colors.length];
-  const user = await api.post('/api/users', { name, color });
-  state.users.push(user);
-  renderUserPicker();
-  qs('#new-user-name').value = '';
-  qs('#add-user-form').classList.add('hidden');
-  selectUser(user);
-});
-
-qs('#new-user-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter') qs('#save-user-btn').click();
-});
-
-/* ── Switch user ─────────────────────────────────────────────────── */
-qs('#switch-user-btn').addEventListener('click', () => {
-  renderUserPicker();
-  openModal('user-modal');
-});
 
 /* ── Navigation ──────────────────────────────────────────────────── */
 qsa('.nav-item').forEach(btn => {
@@ -219,7 +184,7 @@ qsa('[data-modal]').forEach(btn => {
 });
 qsa('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', e => {
-    if (e.target === overlay && overlay.id !== 'user-modal') closeModal(overlay.id);
+    if (e.target === overlay) closeModal(overlay.id);
   });
 });
 
@@ -1122,7 +1087,7 @@ qs('#runner-finish-btn').addEventListener('click', async () => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     qsa('.modal-overlay.active').forEach(m => {
-      if (m.id !== 'user-modal') closeModal(m.id);
+      closeModal(m.id);
     });
   }
 });
@@ -1143,18 +1108,24 @@ async function loadAll() {
 
 /* ── Boot ────────────────────────────────────────────────────────── */
 (async function init() {
-  await loadUsers();
+  // Check for OAuth error in URL
+  const params = new URLSearchParams(location.search);
+  const oauthError = params.get('error');
 
-  // Restore last user from localStorage
-  const savedId = localStorage.getItem('ninety_user_id');
-  if (savedId) {
-    const user = state.users.find(u => u.id === parseInt(savedId));
-    if (user) {
-      selectUser(user);
-      return;
-    }
+  // Ask server who's logged in
+  const me = await api.get('/api/me');
+
+  if (me) {
+    // Logged in — load the app
+    await loadUsers();
+    enterApp(me);
+  } else {
+    // Not logged in — show login screen
+    const msgs = {
+      unauthorized: 'Only @sred.ca accounts are allowed.',
+      token_exchange: 'Sign-in failed. Please try again.',
+      cancelled: 'Sign-in was cancelled.',
+    };
+    showLoginScreen(oauthError ? (msgs[oauthError] || 'Sign-in failed.') : null);
   }
-
-  // Show user picker
-  openModal('user-modal');
 })();

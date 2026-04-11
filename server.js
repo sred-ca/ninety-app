@@ -1,9 +1,35 @@
-const express = require('express');
-const path = require('path');
+const express    = require('express');
+const path       = require('path');
+const session    = require('express-session');
 const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// ── Session store ────────────────────────────────────────────────────────────
+// Use Postgres-backed sessions in production (so serverless restarts don't log
+// everyone out); fall back to the default in-memory store locally.
+let sessionStore;
+if (process.env.DATABASE_URL) {
+  const PgSession = require('connect-pg-simple')(session);
+  sessionStore = new PgSession({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: true,
+    tableName: 'user_sessions',
+  });
+}
+
+app.use(session({
+  store: sessionStore,
+  secret: process.env.SESSION_SECRET || 'ninety-dev-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: !!process.env.VERCEL,   // HTTPS-only in production
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    sameSite: 'lax',
+  },
+}));
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -15,7 +41,79 @@ const wrap = (fn) => async (req, res) => {
   catch (e) { console.error(e); fail(res, e.message, 500); }
 };
 
-// Users
+// ── Google OAuth ─────────────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_REDIRECT_URI  = process.env.GOOGLE_REDIRECT_URI ||
+  `http://localhost:${PORT}/auth/google/callback`;
+const ALLOWED_DOMAIN       = 'sred.ca';
+
+// Step 1 — redirect to Google
+app.get('/auth/google', (req, res) => {
+  if (!GOOGLE_CLIENT_ID) {
+    return res.status(500).send('GOOGLE_CLIENT_ID is not configured');
+  }
+  const params = new URLSearchParams({
+    client_id:     GOOGLE_CLIENT_ID,
+    redirect_uri:  GOOGLE_REDIRECT_URI,
+    response_type: 'code',
+    scope:         'openid email profile',
+    access_type:   'online',
+    prompt:        'select_account',
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+// Step 2 — handle callback
+app.get('/auth/google/callback', wrap(async (req, res) => {
+  const { code, error } = req.query;
+  if (error || !code) return res.redirect('/?error=cancelled');
+
+  // Exchange code → tokens
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id:     GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri:  GOOGLE_REDIRECT_URI,
+      grant_type:    'authorization_code',
+    }),
+  });
+  const tokens = await tokenRes.json();
+  if (!tokens.access_token) return res.redirect('/?error=token_exchange');
+
+  // Get Google profile
+  const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  });
+  const profile = await profileRes.json();
+
+  // Enforce @sred.ca domain
+  if (!profile.email || !profile.email.endsWith(`@${ALLOWED_DOMAIN}`)) {
+    return res.redirect('/?error=unauthorized');
+  }
+
+  // Find or create user in DB
+  const user = await userQueries.findOrCreateByEmail(profile.email, profile.name);
+  req.session.userId = user.id;
+  res.redirect('/');
+}));
+
+// Who am I?
+app.get('/api/me', wrap(async (req, res) => {
+  if (!req.session.userId) return ok(res, null);
+  const user = await userQueries.getById(req.session.userId);
+  ok(res, user || null);
+}));
+
+// Logout
+app.get('/auth/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/'));
+});
+
+// ── Users ────────────────────────────────────────────────────────────────────
 app.get('/api/users', wrap(async (req, res) => ok(res, await userQueries.getAll())));
 app.post('/api/users', wrap(async (req, res) => {
   const { name, color } = req.body;
@@ -32,7 +130,7 @@ app.delete('/api/users/:id', wrap(async (req, res) => {
   ok(res, { deleted: true });
 }));
 
-// Rocks — /quarters must come before /:id
+// ── Rocks ────────────────────────────────────────────────────────────────────
 app.get('/api/rocks/quarters', wrap(async (req, res) => ok(res, await rockQueries.quarters())));
 app.get('/api/rocks', wrap(async (req, res) => ok(res, await rockQueries.getAll(req.query.quarter))));
 app.post('/api/rocks', wrap(async (req, res) => {
@@ -47,7 +145,7 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
   ok(res, { deleted: true });
 }));
 
-// Issues — /votes/:userId must come before /:id
+// ── Issues ───────────────────────────────────────────────────────────────────
 app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
 app.get('/api/issues', wrap(async (req, res) => ok(res, await issueQueries.getAll(req.query.status))));
 app.post('/api/issues', wrap(async (req, res) => {
@@ -66,7 +164,7 @@ app.post('/api/issues/:id/vote', wrap(async (req, res) => {
   ok(res, await issueQueries.vote(req.params.id, user_id));
 }));
 
-// Agendas — sections routes before /:id
+// ── Agendas ──────────────────────────────────────────────────────────────────
 app.get('/api/agendas', wrap(async (req, res) => ok(res, await agendaQueries.getAll())));
 app.post('/api/agendas', wrap(async (req, res) => {
   const { title } = req.body;
@@ -86,7 +184,7 @@ app.delete('/api/agenda-sections/:id', wrap(async (req, res) => {
   await agendaQueries.deleteSection(req.params.id); ok(res, { deleted: true });
 }));
 
-// Meetings
+// ── Meetings ─────────────────────────────────────────────────────────────────
 app.get('/api/meetings', wrap(async (req, res) => ok(res, await meetingQueries.getAll(req.query.status))));
 app.post('/api/meetings', wrap(async (req, res) => {
   const { agenda_id, title, scheduled_at, sections_snapshot } = req.body;
@@ -98,10 +196,10 @@ app.delete('/api/meetings/:id', wrap(async (req, res) => {
   await meetingQueries.delete(req.params.id); ok(res, { deleted: true });
 }));
 
-// SPA catch-all
+// ── SPA catch-all ─────────────────────────────────────────────────────────────
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Boot — on Vercel serverless, don't exit on DB init failure (would crash the function)
+// ── Boot ─────────────────────────────────────────────────────────────────────
 const IS_SERVERLESS = !!process.env.VERCEL;
 const dbReady = initDb().catch(e => {
   console.error('DB init failed:', e.message);
@@ -112,5 +210,4 @@ if (require.main === module) {
   dbReady.then(() => app.listen(PORT, () => console.log(`\n🚀  Ninety App  →  http://localhost:${PORT}\n`)));
 }
 
-// Vercel serverless export
 module.exports = app;
