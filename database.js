@@ -271,7 +271,7 @@ if (USE_PG) {
     delete: async (id) => pool.query('DELETE FROM meetings WHERE id=$1', [id]),
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
 
 } else {
 

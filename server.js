@@ -1,19 +1,19 @@
 const express    = require('express');
 const path       = require('path');
 const session    = require('express-session');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
+const { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── Session store ────────────────────────────────────────────────────────────
-// Use Postgres-backed sessions in production (so serverless restarts don't log
-// everyone out); fall back to the default in-memory store locally.
+// Use Postgres-backed sessions in production, sharing the same pool as the
+// rest of the app so SSL/connection config is consistent.
 let sessionStore;
-if (process.env.DATABASE_URL) {
+if (process.env.DATABASE_URL && pool) {
   const PgSession = require('connect-pg-simple')(session);
   sessionStore = new PgSession({
-    conString: process.env.DATABASE_URL,
+    pool,                        // reuse the existing pg Pool (same SSL config)
     createTableIfMissing: true,
     tableName: 'user_sessions',
   });
