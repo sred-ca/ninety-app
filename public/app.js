@@ -95,27 +95,10 @@ function badge(text, cls) {
   return el;
 }
 
-function quarters(past = 6, future = 2) {
-  const result = [];
+function quarters() {
   const now = new Date();
-  const curYear = now.getFullYear();
-  const curQ = Math.ceil((now.getMonth() + 1) / 3);
-  // Future quarters first (descending)
-  let y = curYear, q = curQ;
-  for (let i = 0; i < future; i++) {
-    q++;
-    if (q === 5) { q = 1; y++; }
-    result.push(`Q${q} ${y}`);
-  }
-  result.reverse();
-  // Current + past quarters
-  y = curYear; q = curQ;
-  for (let i = 0; i < past + 1; i++) {
-    result.push(`Q${q} ${y}`);
-    q--;
-    if (q === 0) { q = 4; y--; }
-  }
-  return result;
+  const y = now.getFullYear();
+  return [`Q4 ${y}`, `Q3 ${y}`, `Q2 ${y}`, `Q1 ${y}`];
 }
 
 function currentQuarter() {
