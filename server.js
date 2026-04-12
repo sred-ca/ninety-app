@@ -1,35 +1,36 @@
 const express    = require('express');
 const path       = require('path');
-const session    = require('express-session');
-const { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
+const crypto     = require('crypto');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// ── Session store ────────────────────────────────────────────────────────────
-// Use Postgres-backed sessions in production, sharing the same pool as the
-// rest of the app so SSL/connection config is consistent.
-let sessionStore;
-if (process.env.DATABASE_URL && pool) {
-  const PgSession = require('connect-pg-simple')(session);
-  sessionStore = new PgSession({
-    pool,                        // reuse the existing pg Pool (same SSL config)
-    createTableIfMissing: true,
-    tableName: 'user_sessions',
-  });
+// ── Stateless HMAC-signed cookie auth ────────────────────────────────────────
+// No session store needed — userId is signed with a secret and stored in a
+// cookie. Works reliably in serverless environments (no DB round-trip for auth).
+const COOKIE_NAME   = 'ninety_auth';
+const COOKIE_SECRET = process.env.SESSION_SECRET || 'ninety-dev-secret-change-me';
+
+function makeAuthCookie(userId) {
+  const payload = Buffer.from(JSON.stringify({ userId })).toString('base64url');
+  const sig     = crypto.createHmac('sha256', COOKIE_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
 }
 
-app.use(session({
-  store: sessionStore,
-  secret: process.env.SESSION_SECRET || 'ninety-dev-secret-change-me',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: !!process.env.VERCEL,   // HTTPS-only in production
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    sameSite: 'lax',
-  },
-}));
+function readAuthCookie(req) {
+  const raw   = req.headers.cookie || '';
+  const match = raw.match(/(?:^|;)\s*ninety_auth=([^;]+)/);
+  if (!match) return null;
+  const [payload, sig] = decodeURIComponent(match[1]).split('.');
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac('sha256', COOKIE_SECRET).update(payload).digest('base64url');
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(sig, 'base64url'), Buffer.from(expected, 'base64url'))) return null;
+  } catch { return null; }
+  try { return JSON.parse(Buffer.from(payload, 'base64url').toString()); }
+  catch { return null; }
+}
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -103,13 +104,15 @@ app.get('/auth/google/callback', async (req, res) => {
 
     // Find or create user in DB
     const user = await userQueries.findOrCreateByEmail(profile.email, profile.name);
-    req.session.userId = user.id;
 
-    // Explicitly save session before redirecting (critical in serverless)
-    req.session.save((err) => {
-      if (err) console.error('Session save error:', err);
-      res.redirect('/');
+    // Set stateless HMAC-signed cookie (works in serverless — no session store needed)
+    res.cookie(COOKIE_NAME, makeAuthCookie(user.id), {
+      httpOnly: true,
+      secure: !!process.env.VERCEL,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
+    res.redirect('/');
   } catch (e) {
     console.error('OAuth callback error:', e);
     res.redirect('/?error=server_error');
@@ -118,14 +121,16 @@ app.get('/auth/google/callback', async (req, res) => {
 
 // Who am I?
 app.get('/api/me', wrap(async (req, res) => {
-  if (!req.session.userId) return ok(res, null);
-  const user = await userQueries.getById(req.session.userId);
+  const auth = readAuthCookie(req);
+  if (!auth) return ok(res, null);
+  const user = await userQueries.getById(auth.userId);
   ok(res, user || null);
 }));
 
 // Logout
 app.get('/auth/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/'));
+  res.clearCookie(COOKIE_NAME);
+  res.redirect('/');
 });
 
 // ── Users ────────────────────────────────────────────────────────────────────
