@@ -60,6 +60,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span>Meetings</span>
         </button>
+        <button class="nav-item" data-view="insights">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>Insights</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -245,6 +249,134 @@
                   Add Section
                 </button>
                 <span class="agenda-total-time" id="agenda-total-time">Total: 0 min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Insights View ────────────────────────────────────────── -->
+      <section id="view-insights" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Insights</h1>
+            <p class="view-subtitle">Explore, analyze, and act on insights to drive data-driven decisions across your organization.</p>
+          </div>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="insights-filters">
+          <div class="insights-filter-group">
+            <label class="insights-filter-label">Person</label>
+            <select id="insights-owner-filter" class="select-input insights-select">
+              <option value="">All People</option>
+            </select>
+          </div>
+          <div class="insights-filter-group">
+            <label class="insights-filter-label">Time Period</label>
+            <div class="filter-tabs" id="insights-period-tabs">
+              <button class="filter-tab active" data-period="current">Current Quarter</button>
+              <button class="filter-tab" data-period="last">Last Quarter</button>
+              <button class="filter-tab" data-period="all">All Time</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="insights-subtabs">
+          <button class="insights-subtab active" data-itab="rocks">Rocks</button>
+          <button class="insights-subtab" data-itab="todos">To-Dos</button>
+          <button class="insights-subtab" data-itab="meetings">Meetings</button>
+        </div>
+
+        <!-- Rocks panel -->
+        <div id="insights-panel-rocks" class="insights-panel">
+          <div class="stats-bar" id="insights-rocks-stats"></div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <span class="chart-card-title">Status Overview</span>
+                <span class="chart-card-subtitle">Breakdown by current status</span>
+              </div>
+              <div class="chart-canvas-wrap chart-canvas-wrap--donut">
+                <canvas id="chart-rocks-status"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <span class="chart-card-title">Progress Distribution</span>
+                <span class="chart-card-subtitle">Rocks grouped by completion range</span>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-rocks-progress"></canvas>
+              </div>
+            </div>
+            <div class="chart-card chart-card--wide">
+              <div class="chart-card-header">
+                <span class="chart-card-title">By Owner</span>
+                <span class="chart-card-subtitle">Rock count and average progress per person</span>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-rocks-owner"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- To-Dos panel -->
+        <div id="insights-panel-todos" class="insights-panel" style="display:none">
+          <div class="stats-bar" id="insights-todos-stats"></div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <span class="chart-card-title">Status Overview</span>
+                <span class="chart-card-subtitle">In Progress / Blocker / Solved</span>
+              </div>
+              <div class="chart-canvas-wrap chart-canvas-wrap--donut">
+                <canvas id="chart-todos-status"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <span class="chart-card-title">By Priority</span>
+                <span class="chart-card-subtitle">High / Medium / Low distribution</span>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-todos-priority"></canvas>
+              </div>
+            </div>
+            <div class="chart-card chart-card--wide">
+              <div class="chart-card-header">
+                <span class="chart-card-title">By Owner</span>
+                <span class="chart-card-subtitle">Open to-dos per person</span>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-todos-owner"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Meetings panel -->
+        <div id="insights-panel-meetings" class="insights-panel" style="display:none">
+          <div class="stats-bar" id="insights-meetings-stats"></div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <span class="chart-card-title">Status Breakdown</span>
+                <span class="chart-card-subtitle">Upcoming / In Progress / Completed</span>
+              </div>
+              <div class="chart-canvas-wrap chart-canvas-wrap--donut">
+                <canvas id="chart-meetings-status"></canvas>
+              </div>
+            </div>
+            <div class="chart-card chart-card--wide">
+              <div class="chart-card-header">
+                <span class="chart-card-title">Meeting Timeline</span>
+                <span class="chart-card-subtitle">Meetings scheduled per month</span>
+              </div>
+              <div class="chart-canvas-wrap">
+                <canvas id="chart-meetings-timeline"></canvas>
               </div>
             </div>
           </div>
@@ -465,6 +597,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

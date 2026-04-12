@@ -31,6 +31,14 @@ const state = {
     playing: false,
     interval: null,
   },
+  // Insights
+  insightsSubTab: 'rocks',
+  insightsPeriod: 'current',
+  insightsOwner: '',
+  insightCharts: {},
+  insightsRocks: [],
+  insightsTodos: [],
+  insightsMeetings: [],
 };
 
 /* ── API ─────────────────────────────────────────────────────────── */
@@ -103,6 +111,21 @@ function quarters(count = 8) {
 function currentQuarter() {
   const now = new Date();
   return `Q${Math.ceil((now.getMonth() + 1) / 3)} ${now.getFullYear()}`;
+}
+
+function periodDateRange(period) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const q = Math.ceil((now.getMonth() + 1) / 3);
+  const qStart = (qn, yr) => new Date(yr, (qn - 1) * 3, 1);
+  const qEnd   = (qn, yr) => new Date(yr, qn * 3, 0, 23, 59, 59, 999);
+  if (period === 'current') return { start: qStart(q, y), end: qEnd(q, y) };
+  if (period === 'last') {
+    const lq = q === 1 ? 4 : q - 1;
+    const ly = q === 1 ? y - 1 : y;
+    return { start: qStart(lq, ly), end: qEnd(lq, ly) };
+  }
+  return { start: new Date(0), end: new Date(9999, 0) };
 }
 
 /* Add N business days to today, return YYYY-MM-DD string */
@@ -178,8 +201,9 @@ qsa('.nav-item').forEach(btn => {
     qsa('.view').forEach(v => v.classList.remove('active'));
     qs(`#view-${view}`).classList.add('active');
     state.currentView = view;
-    if (view === 'my90')     loadMy90();
-    if (view === 'meetings') loadMeetings();
+    if (view === 'my90')      loadMy90();
+    if (view === 'meetings')  loadMeetings();
+    if (view === 'insights')  loadInsights();
   });
 });
 
@@ -1280,6 +1304,300 @@ function renderMy90() {
 
   meetingsBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('meetings'));
   grid.appendChild(meetingsBox);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   INSIGHTS
+   ════════════════════════════════════════════════════════════════════ */
+
+let insightsListenersWired = false;
+
+function applyChartJsDefaults() {
+  Chart.defaults.color = '#9494b0';
+  Chart.defaults.borderColor = '#2e2e42';
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+  Chart.defaults.font.size = 12;
+  Chart.defaults.plugins.legend.labels.boxWidth = 12;
+  Chart.defaults.plugins.legend.labels.padding = 16;
+  Chart.defaults.plugins.tooltip.backgroundColor = '#222230';
+  Chart.defaults.plugins.tooltip.titleColor = '#e8e8f0';
+  Chart.defaults.plugins.tooltip.bodyColor = '#9494b0';
+  Chart.defaults.plugins.tooltip.borderColor = '#2e2e42';
+  Chart.defaults.plugins.tooltip.borderWidth = 1;
+  Chart.defaults.plugins.tooltip.padding = 10;
+  Chart.defaults.plugins.tooltip.cornerRadius = 8;
+}
+
+function destroyChart(id) {
+  if (state.insightCharts[id]) {
+    state.insightCharts[id].destroy();
+    delete state.insightCharts[id];
+  }
+}
+
+function initInsightsListeners() {
+  if (insightsListenersWired) return;
+  insightsListenersWired = true;
+
+  qs('#insights-owner-filter').addEventListener('change', () => {
+    state.insightsOwner = qs('#insights-owner-filter').value;
+    renderInsightsActiveTab();
+  });
+
+  qsa('#insights-period-tabs .filter-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      qsa('#insights-period-tabs .filter-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.insightsPeriod = btn.dataset.period;
+      renderInsightsActiveTab();
+    });
+  });
+
+  qsa('.insights-subtab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      qsa('.insights-subtab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.insightsSubTab = btn.dataset.itab;
+      qsa('.insights-panel').forEach(p => { p.style.display = 'none'; });
+      qs(`#insights-panel-${state.insightsSubTab}`).style.display = '';
+      renderInsightsActiveTab();
+    });
+  });
+}
+
+async function loadInsights() {
+  applyChartJsDefaults();
+  initInsightsListeners();
+
+  // Populate owner dropdown from already-loaded users
+  const ownerSel = qs('#insights-owner-filter');
+  ownerSel.innerHTML = '<option value="">All People</option>' +
+    state.users.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+  ownerSel.value = state.insightsOwner;
+
+  // Fetch all data (client-side filtering)
+  [state.insightsRocks, state.insightsTodos, state.insightsMeetings] = await Promise.all([
+    api.get('/api/rocks'),
+    api.get('/api/issues'),
+    api.get('/api/meetings'),
+  ]);
+
+  renderInsightsActiveTab();
+}
+
+function renderInsightsActiveTab() {
+  const tab = state.insightsSubTab;
+  if (tab === 'rocks')    renderInsightsRocks();
+  if (tab === 'todos')    renderInsightsTodos();
+  if (tab === 'meetings') renderInsightsMeetings();
+}
+
+function filterByOwnerAndPeriod(items, dateField) {
+  const { start, end } = periodDateRange(state.insightsPeriod);
+  return items.filter(item => {
+    if (state.insightsOwner && String(item.owner_id) !== state.insightsOwner) return false;
+    if (dateField && item[dateField]) {
+      const d = new Date(item[dateField]);
+      if (d < start || d > end) return false;
+    }
+    return true;
+  });
+}
+
+function filterMeetingsByPeriod(meetings) {
+  const { start, end } = periodDateRange(state.insightsPeriod);
+  return meetings.filter(m => {
+    const d = new Date(m.scheduled_at || m.created_at);
+    return d >= start && d <= end;
+  });
+}
+
+function renderInsightsRocks() {
+  const filtered  = filterByOwnerAndPeriod(state.insightsRocks, 'created_at');
+  const total     = filtered.length;
+  const done      = filtered.filter(r => r.status === 'done').length;
+  const onT       = filtered.filter(r => r.status === 'on_track').length;
+  const offT      = filtered.filter(r => r.status === 'off_track').length;
+  const notStart  = filtered.filter(r => r.status === 'not_started').length;
+  const avgProg   = total ? Math.round(filtered.reduce((s, r) => s + (r.progress || 0), 0) / total) : 0;
+  const compRate  = total ? Math.round((done / total) * 100) : 0;
+
+  qs('#insights-rocks-stats').innerHTML = `
+    <div class="stat-card"><span class="stat-label">Total Rocks</span><span class="stat-value">${total}</span></div>
+    <div class="stat-card green"><span class="stat-label">On Track</span><span class="stat-value">${onT}</span></div>
+    <div class="stat-card red"><span class="stat-label">Off Track</span><span class="stat-value">${offT}</span></div>
+    <div class="stat-card accent"><span class="stat-label">Done</span><span class="stat-value">${done}</span></div>
+    <div class="stat-card"><span class="stat-label">Avg Progress</span><span class="stat-value">${avgProg}%</span></div>
+    <div class="stat-card"><span class="stat-label">Completion Rate</span><span class="stat-value">${compRate}%</span></div>
+  `;
+
+  // Donut: status breakdown
+  destroyChart('rocks-status');
+  state.insightCharts['rocks-status'] = new Chart(qs('#chart-rocks-status').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Not Started', 'On Track', 'Off Track', 'Done'],
+      datasets: [{ data: [notStart, onT, offT, done],
+        backgroundColor: ['#2a2a3d', '#10b981', '#ef4444', '#3b82f6'],
+        borderColor: '#1a1a24', borderWidth: 3, hoverOffset: 6 }],
+    },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} (${total ? Math.round(ctx.parsed / total * 100) : 0}%)` } } } },
+  });
+
+  // Bar: progress buckets
+  destroyChart('rocks-progress');
+  const bkts = [0, 0, 0, 0, 0];
+  filtered.forEach(r => {
+    const p = r.progress || 0;
+    if (p === 100) bkts[4]++;
+    else if (p >= 76) bkts[3]++;
+    else if (p >= 51) bkts[2]++;
+    else if (p >= 26) bkts[1]++;
+    else bkts[0]++;
+  });
+  state.insightCharts['rocks-progress'] = new Chart(qs('#chart-rocks-progress').getContext('2d'), {
+    type: 'bar',
+    data: { labels: ['0–25%', '26–50%', '51–75%', '76–99%', '100%'],
+      datasets: [{ label: 'Rocks', data: bkts, backgroundColor: '#6366f1', hoverBackgroundColor: '#7c7ff5', borderRadius: 6, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0' } },
+                y: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true } } },
+  });
+
+  // Horizontal bar: by owner
+  destroyChart('rocks-owner');
+  const om = {};
+  filtered.forEach(r => {
+    const n = r.owner_name || 'Unassigned';
+    if (!om[n]) om[n] = { count: 0, prog: 0 };
+    om[n].count++;
+    om[n].prog += (r.progress || 0);
+  });
+  const oNames = Object.keys(om);
+  state.insightCharts['rocks-owner'] = new Chart(qs('#chart-rocks-owner').getContext('2d'), {
+    type: 'bar',
+    data: { labels: oNames,
+      datasets: [
+        { label: 'Rock Count', data: oNames.map(n => om[n].count), backgroundColor: '#6366f1', hoverBackgroundColor: '#7c7ff5', borderRadius: 4, borderSkipped: false },
+        { label: 'Avg Progress %', data: oNames.map(n => Math.round(om[n].prog / om[n].count)), backgroundColor: '#10b981', hoverBackgroundColor: '#34d399', borderRadius: 4, borderSkipped: false },
+      ] },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label === 'Avg Progress %' ? ` Avg Progress: ${ctx.parsed.x}%` : ` Rock Count: ${ctx.parsed.x}` } } },
+      scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true },
+                y: { grid: { color: 'transparent' }, ticks: { color: '#9494b0' } } } },
+  });
+}
+
+function renderInsightsTodos() {
+  const filtered = filterByOwnerAndPeriod(state.insightsTodos, 'created_at');
+  const total    = filtered.length;
+  const inProg   = filtered.filter(i => i.status === 'in_progress').length;
+  const blocker  = filtered.filter(i => i.status === 'blocker').length;
+  const solved   = filtered.filter(i => i.status === 'solved').length;
+  const highP    = filtered.filter(i => i.priority === 'high').length;
+  const medP     = filtered.filter(i => i.priority === 'medium').length;
+  const lowP     = filtered.filter(i => i.priority === 'low').length;
+
+  qs('#insights-todos-stats').innerHTML = `
+    <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
+    <div class="stat-card blue"><span class="stat-label">In Progress</span><span class="stat-value">${inProg}</span></div>
+    <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${blocker}</span></div>
+    <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
+    <div class="stat-card red"><span class="stat-label">High Priority</span><span class="stat-value">${highP}</span></div>
+  `;
+
+  destroyChart('todos-status');
+  state.insightCharts['todos-status'] = new Chart(qs('#chart-todos-status').getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: ['In Progress', 'Blocker', 'Solved'],
+      datasets: [{ data: [inProg, blocker, solved], backgroundColor: ['#3b82f6', '#ef4444', '#10b981'],
+        borderColor: '#1a1a24', borderWidth: 3, hoverOffset: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} (${total ? Math.round(ctx.parsed / total * 100) : 0}%)` } } } },
+  });
+
+  destroyChart('todos-priority');
+  state.insightCharts['todos-priority'] = new Chart(qs('#chart-todos-priority').getContext('2d'), {
+    type: 'bar',
+    data: { labels: ['High', 'Medium', 'Low'],
+      datasets: [{ label: 'To-Dos', data: [highP, medP, lowP],
+        backgroundColor: ['#ef4444', '#f59e0b', '#2a2a3d'],
+        hoverBackgroundColor: ['#f87171', '#fbbf24', '#3a3a55'], borderRadius: 6, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0' } },
+                y: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true } } },
+  });
+
+  destroyChart('todos-owner');
+  const om = {};
+  filtered.forEach(i => { const n = i.owner_name || 'Unassigned'; om[n] = (om[n] || 0) + 1; });
+  const oNames = Object.keys(om);
+  state.insightCharts['todos-owner'] = new Chart(qs('#chart-todos-owner').getContext('2d'), {
+    type: 'bar',
+    data: { labels: oNames,
+      datasets: [{ label: 'Open To-Dos', data: oNames.map(n => om[n]),
+        backgroundColor: '#6366f1', hoverBackgroundColor: '#7c7ff5', borderRadius: 4, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true },
+                y: { grid: { color: 'transparent' }, ticks: { color: '#9494b0' } } } },
+  });
+}
+
+function renderInsightsMeetings() {
+  const filtered  = filterMeetingsByPeriod(state.insightsMeetings);
+  const total     = filtered.length;
+  const upcoming  = filtered.filter(m => m.status === 'upcoming').length;
+  const inProg    = filtered.filter(m => m.status === 'in_progress').length;
+  const completed = filtered.filter(m => m.status === 'completed').length;
+  const withDur   = filtered.filter(m => m.status === 'completed' && m.started_at && m.ended_at);
+  const avgDur    = withDur.length
+    ? Math.round(withDur.reduce((s, m) => s + (new Date(m.ended_at) - new Date(m.started_at)), 0) / withDur.length / 60000)
+    : 0;
+
+  qs('#insights-meetings-stats').innerHTML = `
+    <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
+    <div class="stat-card green"><span class="stat-label">Completed</span><span class="stat-value">${completed}</span></div>
+    <div class="stat-card yellow"><span class="stat-label">Upcoming</span><span class="stat-value">${upcoming}</span></div>
+    <div class="stat-card"><span class="stat-label">Avg Duration</span><span class="stat-value">${avgDur ? avgDur + ' min' : '—'}</span></div>
+  `;
+
+  destroyChart('meetings-status');
+  state.insightCharts['meetings-status'] = new Chart(qs('#chart-meetings-status').getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: ['Upcoming', 'In Progress', 'Completed'],
+      datasets: [{ data: [upcoming, inProg, completed], backgroundColor: ['#f59e0b', '#6366f1', '#10b981'],
+        borderColor: '#1a1a24', borderWidth: 3, hoverOffset: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} (${total ? Math.round(ctx.parsed / total * 100) : 0}%)` } } } },
+  });
+
+  destroyChart('meetings-timeline');
+  const monthMap = {};
+  filtered.forEach(m => {
+    const d = new Date(m.scheduled_at || m.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    monthMap[key] = (monthMap[key] || 0) + 1;
+  });
+  const monthKeys   = Object.keys(monthMap).sort();
+  const monthLabels = monthKeys.map(k => {
+    const [yr, mo] = k.split('-');
+    return new Date(+yr, +mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  });
+  state.insightCharts['meetings-timeline'] = new Chart(qs('#chart-meetings-timeline').getContext('2d'), {
+    type: 'bar',
+    data: { labels: monthLabels.length ? monthLabels : ['No data'],
+      datasets: [{ label: 'Meetings', data: monthKeys.length ? monthKeys.map(k => monthMap[k]) : [0],
+        backgroundColor: '#6366f1', hoverBackgroundColor: '#7c7ff5', borderRadius: 6, borderSkipped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0' } },
+                y: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true } } },
+  });
 }
 
 /* ── Load all ────────────────────────────────────────────────────── */

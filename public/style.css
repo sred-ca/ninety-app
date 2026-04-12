@@ -214,6 +214,7 @@ body {
 .stat-card.yellow .stat-value { color: var(--yellow); }
 .stat-card.red .stat-value    { color: var(--red); }
 .stat-card.accent .stat-value { color: var(--accent); }
+.stat-card.blue .stat-value   { color: var(--blue); }
 
 /* ── Card (table wrapper) ─────────────────────────────────────────── */
 .card {
@@ -1833,4 +1834,59 @@ textarea { resize: vertical; min-height: 72px; }
   font-size: 13px;
   color: var(--text2);
   font-style: italic;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   INSIGHTS VIEW
+   ════════════════════════════════════════════════════════════════════ */
+
+.insights-filters {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.insights-filter-group { display: flex; align-items: center; gap: 10px; }
+.insights-filter-label {
+  font-size: 12px; font-weight: 600; color: var(--text2);
+  text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+}
+.insights-select { min-width: 150px; }
+
+.insights-subtabs {
+  display: flex; gap: 4px; margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.insights-subtab {
+  padding: 8px 20px; border: none; background: transparent; color: var(--text2);
+  font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.insights-subtab:hover { color: var(--text); }
+.insights-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.chart-card--wide { grid-column: 1 / -1; }
+
+.chart-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 24px 24px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.chart-card-header { display: flex; flex-direction: column; gap: 3px; }
+.chart-card-title { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -0.2px; }
+.chart-card-subtitle { font-size: 12px; color: var(--text2); }
+
+.chart-canvas-wrap { position: relative; height: 240px; }
+.chart-canvas-wrap--donut { height: 220px; max-width: 340px; margin: 0 auto; }
+
+@media (max-width: 900px) {
+  .chart-grid { grid-template-columns: 1fr; }
+  .chart-card--wide { grid-column: 1; }
 }
