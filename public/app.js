@@ -5,7 +5,11 @@ const state = {
   rocks: [],
   issues: [],
   userVotes: [],
-  currentView: 'rocks',
+  currentView: 'my90',
+  my90Rocks: [],
+  my90Issues: [],
+  my90Meetings: [],
+  my90Votes: [],
   quarterFilter: '',
   issueStatusFilter: '',
   issueOwnerFilter: '',
@@ -174,6 +178,7 @@ qsa('.nav-item').forEach(btn => {
     qsa('.view').forEach(v => v.classList.remove('active'));
     qs(`#view-${view}`).classList.add('active');
     state.currentView = view;
+    if (view === 'my90')     loadMy90();
     if (view === 'meetings') loadMeetings();
   });
 });
@@ -1098,11 +1103,191 @@ function esc(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   MY 90
+   ════════════════════════════════════════════════════════════════════ */
+
+async function loadMy90() {
+  const in90Str = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+  const uid = state.currentUser?.id;
+
+  const [allRocks, allIssues, allMeetings, votes] = await Promise.all([
+    api.get('/api/rocks?quarter=' + encodeURIComponent(currentQuarter())),
+    api.get('/api/issues'),
+    api.get('/api/meetings'),
+    uid ? api.get(`/api/issues/votes/${uid}`) : Promise.resolve([]),
+  ]);
+
+  state.my90Rocks    = allRocks.filter(r => r.owner_id === uid);
+  state.my90Issues   = allIssues.filter(i =>
+    i.owner_id === uid && !i.archived && i.status !== 'solved'
+  );
+  state.my90Meetings = allMeetings.filter(m =>
+    m.status === 'upcoming' && m.scheduled_at && m.scheduled_at.slice(0, 10) <= in90Str
+  );
+  state.my90Votes = votes;
+
+  renderMy90();
+}
+
+function renderMy90() {
+  const grid = qs('#my90-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const u = state.currentUser;
+  if (u) {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    qs('#my90-subtitle').textContent = `${u.name.split(' ')[0]}'s workspace · ${today}`;
+  }
+
+  // Helper: navigate to another tab
+  function goToView(view) {
+    const btn = qs(`.nav-item[data-view="${view}"]`);
+    if (btn) btn.click();
+  }
+
+  // ── Box 1: My Rocks ───────────────────────────────────────────────
+  const rocksBox = document.createElement('div');
+  rocksBox.className = 'card my90-box';
+
+  const rockStatusLabel = { on_track: 'On Track', off_track: 'Off Track', done: 'Done', not_started: 'Not Started' };
+
+  rocksBox.innerHTML = `
+    <div class="my90-box-header">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      </svg>
+      <span class="my90-box-title">My Rocks</span>
+      <span class="my90-box-quarter">${currentQuarter()}</span>
+      <span class="my90-box-count">${state.my90Rocks.length}</span>
+      <button class="btn btn-ghost my90-view-all" data-goto="rocks">View All</button>
+    </div>
+    <div class="my90-box-body" id="my90-rocks-body"></div>
+  `;
+
+  const rocksBody = rocksBox.querySelector('#my90-rocks-body');
+  if (state.my90Rocks.length === 0) {
+    rocksBody.innerHTML = `<div class="my90-empty">No rocks for ${currentQuarter()} — add one in the Rocks tab.</div>`;
+  } else {
+    state.my90Rocks.forEach(rock => {
+      const pct = rock.progress || 0;
+      const isDone = rock.status === 'done';
+      const row = document.createElement('div');
+      row.className = 'my90-row';
+      row.innerHTML = `
+        <div class="my90-row-title">${esc(rock.title)}</div>
+        <div class="my90-mini-progress"><div class="my90-mini-progress-fill ${isDone ? 'done' : ''}" style="width:${pct}%"></div></div>
+        <span class="my90-pct">${pct}%</span>
+      `;
+      const badgeEl = badge(rockStatusLabel[rock.status] || rock.status, rock.status);
+      badgeEl.classList.add('my90-badge');
+      row.appendChild(badgeEl);
+      rocksBody.appendChild(row);
+    });
+  }
+
+  rocksBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('rocks'));
+  grid.appendChild(rocksBox);
+
+  // ── Box 2: My To-Dos ──────────────────────────────────────────────
+  const todosBox = document.createElement('div');
+  todosBox.className = 'card my90-box';
+
+  const blockerCount  = state.my90Issues.filter(i => i.status === 'blocker').length;
+  const overdueCount  = state.my90Issues.filter(i => {
+    if (!i.due_date) return false;
+    return i.due_date.slice(0, 10) < new Date().toISOString().slice(0, 10);
+  }).length;
+
+  todosBox.innerHTML = `
+    <div class="my90-box-header">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
+        <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+      </svg>
+      <span class="my90-box-title">My To-Dos</span>
+      ${blockerCount  ? `<span class="my90-box-alert red">${blockerCount} blocker${blockerCount > 1 ? 's' : ''}</span>` : ''}
+      ${overdueCount  ? `<span class="my90-box-alert yellow">${overdueCount} overdue</span>` : ''}
+      <span class="my90-box-count">${state.my90Issues.length}</span>
+      <button class="btn btn-ghost my90-view-all" data-goto="issues">View All</button>
+    </div>
+    <div class="my90-box-body" id="my90-todos-body"></div>
+  `;
+
+  const todosBody = todosBox.querySelector('#my90-todos-body');
+  if (state.my90Issues.length === 0) {
+    todosBody.innerHTML = `<div class="my90-empty">No open to-dos assigned to you.</div>`;
+  } else {
+    state.my90Issues.forEach(issue => {
+      const due = formatDueDate(issue.due_date);
+      const row = document.createElement('div');
+      row.className = 'my90-row';
+      row.innerHTML = `
+        <div class="issue-priority-dot ${issue.priority}" style="flex-shrink:0"></div>
+        <div class="my90-row-title">${esc(issue.title)}</div>
+        ${due ? `<div class="due-date-chip due-${due.urgency}" style="flex-shrink:0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;flex-shrink:0">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>${due.text}</div>` : ''}
+      `;
+      const badgeEl = badge(issue.status === 'in_progress' ? 'In Progress' : 'Blocker', issue.status);
+      badgeEl.classList.add('my90-badge');
+      row.appendChild(badgeEl);
+      todosBody.appendChild(row);
+    });
+  }
+
+  todosBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('issues'));
+  grid.appendChild(todosBox);
+
+  // ── Box 3: Upcoming Meetings ──────────────────────────────────────
+  const meetingsBox = document.createElement('div');
+  meetingsBox.className = 'card my90-box';
+
+  meetingsBox.innerHTML = `
+    <div class="my90-box-header">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      <span class="my90-box-title">Upcoming Meetings</span>
+      <span class="my90-box-count">${state.my90Meetings.length}</span>
+      <button class="btn btn-ghost my90-view-all" data-goto="meetings">View All</button>
+    </div>
+    <div class="my90-box-body" id="my90-meetings-body"></div>
+  `;
+
+  const meetingsBody = meetingsBox.querySelector('#my90-meetings-body');
+  if (state.my90Meetings.length === 0) {
+    meetingsBody.innerHTML = `<div class="my90-empty">No upcoming meetings in the next 90 days.</div>`;
+  } else {
+    state.my90Meetings.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'my90-row';
+      let dateStr = '';
+      if (m.scheduled_at) {
+        const d = new Date(m.scheduled_at);
+        dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+          ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      }
+      row.innerHTML = `
+        <div class="my90-row-title">${esc(m.title)}</div>
+        ${dateStr ? `<span class="my90-meeting-date">${dateStr}</span>` : '<span class="my90-meeting-date" style="color:var(--text2)">Unscheduled</span>'}
+      `;
+      meetingsBody.appendChild(row);
+    });
+  }
+
+  meetingsBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('meetings'));
+  grid.appendChild(meetingsBox);
+}
+
 /* ── Load all ────────────────────────────────────────────────────── */
 async function loadAll() {
   await Promise.all([
     populateQuarterFilter().then(() => loadRocks()),
     loadIssues(),
+    loadMy90(),
   ]);
 }
 

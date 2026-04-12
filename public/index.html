@@ -44,7 +44,11 @@
       </div>
 
       <nav class="sidebar-nav">
-        <button class="nav-item active" data-view="rocks">
+        <button class="nav-item active" data-view="my90">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>My 90</span>
+        </button>
+        <button class="nav-item" data-view="rocks">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           <span>Rocks</span>
         </button>
@@ -72,8 +76,19 @@
     <!-- Main Content -->
     <main class="main">
 
+      <!-- ── My 90 View ────────────────────────────────── -->
+      <section id="view-my90" class="view active">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>My 90</h1>
+            <p class="view-subtitle" id="my90-subtitle">Your next 90 days</p>
+          </div>
+        </div>
+        <div class="my90-grid" id="my90-grid"></div>
+      </section>
+
       <!-- ── Rocks View ─────────────────────────────────── -->
-      <section id="view-rocks" class="view active">
+      <section id="view-rocks" class="view">
         <div class="view-header">
           <div class="view-header-left">
             <h1>Rocks</h1>

@@ -1686,3 +1686,151 @@ textarea { resize: vertical; min-height: 72px; }
   background: var(--surface3);
   color: var(--text);
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   MY 90 VIEW
+   ══════════════════════════════════════════════════════════════════ */
+
+.my90-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.my90-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.my90-box-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.my90-box-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.my90-box-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.my90-box-quarter {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--surface3);
+  padding: 2px 7px;
+  border-radius: 99px;
+}
+
+.my90-box-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  background: var(--surface3);
+  padding: 2px 8px;
+  border-radius: 99px;
+  min-width: 24px;
+  text-align: center;
+}
+
+.my90-box-alert {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 99px;
+}
+.my90-box-alert.red    { color: var(--red);    background: var(--red-bg); }
+.my90-box-alert.yellow { color: var(--yellow); background: var(--yellow-bg); }
+
+.my90-view-all {
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  flex-shrink: 0;
+}
+
+.my90-box-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.my90-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  min-width: 0;
+  transition: background 0.12s;
+}
+.my90-row:last-child { border-bottom: none; }
+.my90-row:hover { background: var(--surface2); }
+
+.my90-row-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.my90-mini-progress {
+  width: 56px;
+  height: 5px;
+  background: var(--surface3);
+  border-radius: 99px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.my90-mini-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.3s;
+}
+.my90-mini-progress-fill.done { background: var(--green); }
+
+.my90-pct {
+  font-size: 11px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.my90-badge {
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  flex-shrink: 0;
+}
+
+.my90-meeting-date {
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.my90-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text2);
+  font-style: italic;
+}
