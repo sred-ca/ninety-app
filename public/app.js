@@ -78,13 +78,28 @@ function initials(name) {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
-function avatar(name, color, size = 28) {
+function avatar(name, picture, color, size = 28) {
   const el = document.createElement('div');
   el.className = 'avatar';
-  el.style.background = color || '#6366f1';
   el.style.width = el.style.height = size + 'px';
-  el.style.fontSize = (size * 0.38) + 'px';
-  el.textContent = initials(name);
+  if (picture) {
+    const img = document.createElement('img');
+    img.src = picture;
+    img.alt = name || '';
+    img.referrerPolicy = 'no-referrer';
+    // Fall back to initials if the image fails (e.g., Google URL rotated)
+    img.onerror = () => {
+      el.removeChild(img);
+      el.style.background = color || '#6366f1';
+      el.style.fontSize = (size * 0.38) + 'px';
+      el.textContent = initials(name);
+    };
+    el.appendChild(img);
+  } else {
+    el.style.background = color || '#6366f1';
+    el.style.fontSize = (size * 0.38) + 'px';
+    el.textContent = initials(name);
+  }
   return el;
 }
 
@@ -179,9 +194,8 @@ function enterApp(user) {
 function updateSidebarUser() {
   const u = state.currentUser;
   if (!u) return;
-  const avEl = qs('#sidebar-avatar');
-  avEl.style.background = u.color;
-  avEl.textContent = initials(u.name);
+  const fresh = avatar(u.name, u.picture, u.color, 28);
+  qs('#sidebar-avatar').replaceWith(Object.assign(fresh, { id: 'sidebar-avatar' }));
   qs('#sidebar-username').textContent = u.name;
 }
 
@@ -258,7 +272,7 @@ function renderRocks() {
     const ownerCell = document.createElement('div');
     ownerCell.className = 'owner-cell';
     if (rock.owner_name) {
-      ownerCell.appendChild(avatar(rock.owner_name, rock.owner_color));
+      ownerCell.appendChild(avatar(rock.owner_name, rock.owner_picture, rock.owner_color));
       ownerCell.appendChild(document.createTextNode(rock.owner_name));
     } else {
       ownerCell.innerHTML = '<span style="color:var(--text2);font-size:12px">Unassigned</span>';
@@ -489,7 +503,7 @@ function buildIssueCard(issue) {
     const chip = card.querySelector('.issue-owner-chip');
     if (chip) {
       chip.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)';
-      chip.prepend(avatar(issue.owner_name, issue.owner_color, 18));
+      chip.prepend(avatar(issue.owner_name, issue.owner_picture, issue.owner_color, 18));
       chip.append(document.createTextNode(issue.owner_name));
     }
   }

@@ -105,7 +105,7 @@ app.get('/auth/google/callback', async (req, res) => {
     }
 
     // Find or create user in DB
-    const user = await userQueries.findOrCreateByEmail(profile.email, profile.name);
+    const user = await userQueries.findOrCreateByEmail(profile.email, profile.name, profile.picture);
 
     // Set stateless HMAC-signed cookie (works in serverless — no session store needed)
     res.cookie(COOKIE_NAME, makeAuthCookie(user.id), {
