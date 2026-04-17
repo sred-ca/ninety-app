@@ -769,12 +769,23 @@ document.addEventListener('click', (e) => {
   if (!root.contains(e.target)) qs('#issue-owner-filter-panel').hidden = true;
 });
 
-/* Issue view-mode toggle (cards / list) */
+/* Issue view-mode toggle (cards / list) — persisted to localStorage */
+const ISSUE_VIEW_MODE_KEY = 'ninety.issueViewMode';
+{
+  const saved = localStorage.getItem(ISSUE_VIEW_MODE_KEY);
+  if (saved === 'cards' || saved === 'list') {
+    state.issueViewMode = saved;
+    qsa('#issue-view-toggle .view-mode-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === saved);
+    });
+  }
+}
 qsa('#issue-view-toggle .view-mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     qsa('#issue-view-toggle .view-mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     state.issueViewMode = btn.dataset.mode;
+    try { localStorage.setItem(ISSUE_VIEW_MODE_KEY, btn.dataset.mode); } catch {}
     renderIssues();
   });
 });
