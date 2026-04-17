@@ -13,6 +13,7 @@ const state = {
   quarterFilter: '',
   issueStatusFilter: '',
   issueOwnerFilter: '',
+  issueVisibilityFilter: 'public',
   pendingDelete: null,
   // Meetings
   agendas: [],
@@ -524,14 +525,19 @@ function renderIssues() {
   const empty = qs('#issues-empty');
   grid.innerHTML = '';
 
+  // Scope everything (list + stats) to the current visibility tab
+  const inScope = state.issues.filter(i =>
+    state.issueVisibilityFilter === 'private' ? i.private : !i.private
+  );
+
   // Apply owner filter client-side
   const ownerFilter = state.issueOwnerFilter ? +state.issueOwnerFilter : null;
   const filtered = ownerFilter
-    ? state.issues.filter(i => i.owner_id === ownerFilter)
-    : state.issues;
+    ? inScope.filter(i => i.owner_id === ownerFilter)
+    : inScope;
 
-  // Stats: exclude archived from counts; Total excludes solved (use all issues for accurate counts)
-  const activeIssues = state.issues.filter(i => !i.archived);
+  // Stats: exclude archived from counts; Total excludes solved
+  const activeIssues = inScope.filter(i => !i.archived);
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
   const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
   const solved     = activeIssues.filter(i => i.status === 'solved').length;
@@ -639,6 +645,16 @@ function renderIssues() {
 qs('#issue-owner-filter').addEventListener('change', () => {
   state.issueOwnerFilter = qs('#issue-owner-filter').value;
   renderIssues();
+});
+
+/* Issue visibility tabs (Public / Private) */
+qsa('#issue-visibility-tabs .filter-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    qsa('#issue-visibility-tabs .filter-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.issueVisibilityFilter = tab.dataset.visibility;
+    renderIssues();
+  });
 });
 
 /* Issue filter tabs */
