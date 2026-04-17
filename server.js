@@ -38,7 +38,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 const ok   = (res, data) => res.json({ ok: true, data });
 const fail = (res, msg, code = 400) => res.status(code).json({ ok: false, error: msg });
 const wrap = (fn) => async (req, res) => {
-  try { await fn(req, res); }
+  // On cold serverless starts, migrations in initDb() can still be in flight
+  // when the first request arrives. Await dbReady so column adds finish first.
+  try { await dbReady; await fn(req, res); }
   catch (e) { console.error(e); fail(res, e.message, 500); }
 };
 
