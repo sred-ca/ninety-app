@@ -679,7 +679,7 @@ function openIssueModal(editId) {
   qs('#issue-priority').value = issue ? issue.priority : 'medium';
   qs('#issue-status').value = issue ? issue.status : 'in_progress';
   qs('#issue-status-group').style.display = issue ? 'flex' : 'none';
-  qs('#issue-private').checked = issue ? !!issue.private : false;
+  qs('#issue-private').checked = issue ? !!issue.private : (state.issueVisibilityFilter === 'private');
 
   // Due date: existing value or default to 5 business days from today
   qs('#issue-due-date').value = issue
