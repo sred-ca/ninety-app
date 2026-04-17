@@ -105,6 +105,14 @@ function avatar(name, picture, color, size = 28) {
   return el;
 }
 
+const ISSUE_STATUS_LABELS = {
+  in_progress: 'In Progress',
+  waiting_for: 'Waiting For',
+  blocker:     'Blocker',
+  solved:      'Solved',
+};
+function issueStatusLabel(s) { return ISSUE_STATUS_LABELS[s] || s.replace(/_/g, ' '); }
+
 function badge(text, cls) {
   const el = document.createElement('span');
   el.className = `badge badge-${cls}`;
@@ -481,7 +489,7 @@ function buildIssueCard(issue) {
     </div>
     <div class="issue-card-bottom">
       <div class="issue-meta">
-        <span class="badge badge-${issue.status}">${issue.status === 'in_progress' ? 'In Progress' : issue.status === 'blocker' ? 'Blocker' : issue.status.replace('_', ' ')}</span>
+        <span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span>
         <span class="badge badge-${issue.priority}">${issue.priority}</span>
       </div>
       <div class="issue-actions">
@@ -521,9 +529,7 @@ function buildIssueRow(issue) {
   const isOwner    = !!(state.currentUser && issue.owner_id === state.currentUser.id);
   const voted      = state.userVotes.includes(issue.id);
   const due        = formatDueDate(issue.due_date);
-  const statusLabel = issue.status === 'in_progress' ? 'In Progress'
-                    : issue.status === 'blocker'     ? 'Blocker'
-                    : issue.status.replace('_', ' ');
+  const statusLabel = issueStatusLabel(issue.status);
 
   const row = document.createElement('div');
   row.className = `table-row issue-table-row ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''} ${isPrivate ? 'private' : ''}`;
@@ -638,15 +644,17 @@ function renderIssues() {
     ? inScope.filter(i => ownerIds.includes(i.owner_id))
     : inScope;
 
-  // Stats: exclude archived from counts; Total excludes solved
+  // Stats: exclude archived from counts; Total = all open (non-solved)
   const activeIssues = inScope.filter(i => !i.archived);
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
+  const waitingFor = activeIssues.filter(i => i.status === 'waiting_for').length;
   const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
   const solved     = activeIssues.filter(i => i.status === 'solved').length;
-  const total      = inProgress + blockers; // all open (non-solved) issues
+  const total      = inProgress + waitingFor + blockers;
   qs('#issues-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
     <div class="stat-card accent"><span class="stat-label">In Progress</span><span class="stat-value">${inProgress}</span></div>
+    <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waitingFor}</span></div>
     <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${blockers}</span></div>
     <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
   `;
@@ -1449,7 +1457,7 @@ function renderMy90() {
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
           </svg>${due.text}</div>` : ''}
       `;
-      const badgeEl = badge(issue.status === 'in_progress' ? 'In Progress' : 'Blocker', issue.status);
+      const badgeEl = badge(issueStatusLabel(issue.status), issue.status);
       badgeEl.classList.add('my90-badge');
       row.appendChild(badgeEl);
       todosBody.appendChild(row);
@@ -1691,6 +1699,7 @@ function renderInsightsTodos() {
   const filtered = filterByOwnerAndPeriod(state.insightsTodos, 'created_at');
   const total    = filtered.length;
   const inProg   = filtered.filter(i => i.status === 'in_progress').length;
+  const waiting  = filtered.filter(i => i.status === 'waiting_for').length;
   const blocker  = filtered.filter(i => i.status === 'blocker').length;
   const solved   = filtered.filter(i => i.status === 'solved').length;
   const highP    = filtered.filter(i => i.priority === 'high').length;
@@ -1700,6 +1709,7 @@ function renderInsightsTodos() {
   qs('#insights-todos-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
     <div class="stat-card blue"><span class="stat-label">In Progress</span><span class="stat-value">${inProg}</span></div>
+    <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waiting}</span></div>
     <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${blocker}</span></div>
     <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
     <div class="stat-card red"><span class="stat-label">High Priority</span><span class="stat-value">${highP}</span></div>
@@ -1708,8 +1718,8 @@ function renderInsightsTodos() {
   destroyChart('todos-status');
   state.insightCharts['todos-status'] = new Chart(qs('#chart-todos-status').getContext('2d'), {
     type: 'doughnut',
-    data: { labels: ['In Progress', 'Blocker', 'Solved'],
-      datasets: [{ data: [inProg, blocker, solved], backgroundColor: ['#3b82f6', '#ef4444', '#10b981'],
+    data: { labels: ['In Progress', 'Waiting For', 'Blocker', 'Solved'],
+      datasets: [{ data: [inProg, waiting, blocker, solved], backgroundColor: ['#3b82f6', '#f59e0b', '#ef4444', '#10b981'],
         borderColor: '#1a1a24', borderWidth: 3, hoverOffset: 6 }] },
     options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
       plugins: { legend: { position: 'bottom' },

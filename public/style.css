@@ -346,6 +346,7 @@ body {
 .badge-not_started{ background: var(--surface3); color: var(--text2); }
 
 .badge-in_progress { background: var(--blue-bg);   color: var(--blue); }
+.badge-waiting_for { background: var(--yellow-bg); color: var(--yellow); }
 .badge-blocker     { background: var(--red-bg);    color: var(--red); }
 .badge-solved      { background: var(--green-bg);  color: var(--green); }
 
