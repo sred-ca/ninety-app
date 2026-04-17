@@ -390,6 +390,10 @@ function buildIssueCard(issue) {
   const isOwner    = !!(state.currentUser && issue.owner_id === state.currentUser.id);
   const card = document.createElement('div');
   card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''} ${isPrivate ? 'private' : ''}`;
+  if (!isArchived) {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => openIssueModal(issue.id));
+  }
 
   const voted = state.userVotes.includes(issue.id);
 
@@ -474,9 +478,6 @@ function buildIssueCard(issue) {
           ${issue.votes}
         </button>` : ''}
         ${solveBtn}
-        ${!isArchived ? `<button class="icon-btn edit-issue-btn" data-id="${issue.id}" title="Edit">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>` : ''}
         ${privateBtn}
         ${archiveBtn}
         ${unarchiveBtn}
@@ -580,10 +581,6 @@ function renderIssues() {
       else state.userVotes.push(updated.id);
       renderIssues();
     });
-  });
-
-  qsa('.edit-issue-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); openIssueModal(parseInt(btn.dataset.id)); });
   });
 
   qsa('.delete-issue-btn').forEach(btn => {
