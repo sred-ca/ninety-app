@@ -152,6 +152,14 @@
               <button class="filter-tab" data-status="blocker">Blocker</button>
               <button class="filter-tab" data-status="solved">Solved</button>
             </div>
+            <div class="view-mode-toggle" id="issue-view-toggle">
+              <button type="button" class="view-mode-btn active" data-mode="cards" title="Card view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button type="button" class="view-mode-btn" data-mode="list" title="List view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+              </button>
+            </div>
             <button class="btn btn-primary" id="add-issue-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Add To-Do
@@ -163,6 +171,18 @@
         <div class="stats-bar" id="issues-stats"></div>
 
         <div id="issues-list" class="issues-grid"></div>
+        <div id="issues-table" class="card" hidden>
+          <div class="table-header issues-table-header">
+            <span class="th">To-Do</span>
+            <span class="th">Owner</span>
+            <span class="th">Due</span>
+            <span class="th">Priority</span>
+            <span class="th">Status</span>
+            <span class="th">Votes</span>
+            <span class="th"></span>
+          </div>
+          <div id="issues-table-body" class="table-body"></div>
+        </div>
         <div id="issues-empty" class="empty-state hidden">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <p>No to-dos yet. Add one to get started.</p>

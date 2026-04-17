@@ -14,6 +14,7 @@ const state = {
   issueStatusFilter: 'in_progress',
   issueOwnerFilter: [],
   issueVisibilityFilter: 'public',
+  issueViewMode: 'cards',
   pendingDelete: null,
   // Meetings
   agendas: [],
@@ -512,6 +513,75 @@ function buildIssueCard(issue) {
   return card;
 }
 
+/* Build a single issue row (list view) */
+function buildIssueRow(issue) {
+  const isArchived = !!issue.archived;
+  const isSolved   = issue.status === 'solved';
+  const isPrivate  = !!issue.private;
+  const isOwner    = !!(state.currentUser && issue.owner_id === state.currentUser.id);
+  const voted      = state.userVotes.includes(issue.id);
+  const due        = formatDueDate(issue.due_date);
+  const statusLabel = issue.status === 'in_progress' ? 'In Progress'
+                    : issue.status === 'blocker'     ? 'Blocker'
+                    : issue.status.replace('_', ' ');
+
+  const row = document.createElement('div');
+  row.className = `table-row issue-table-row ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''} ${isPrivate ? 'private' : ''}`;
+  if (!isArchived) {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => openIssueModal(issue.id));
+  }
+
+  const privateMark = isPrivate
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;margin-right:6px;vertical-align:-1px;opacity:.7"><rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
+    : '';
+
+  row.innerHTML = `
+    <div class="issue-title-cell">
+      <div class="issue-priority-dot ${issue.priority}" style="margin-right:8px;flex-shrink:0"></div>
+      <div class="issue-row-title">${privateMark}${esc(issue.title)}</div>
+    </div>
+    <div class="issue-row-owner"></div>
+    <div class="issue-row-due">${due ? `<span class="due-date-chip due-${due.urgency}">${due.text}</span>` : '<span style="color:var(--text2)">—</span>'}</div>
+    <div><span class="badge badge-${issue.priority}">${issue.priority}</span></div>
+    <div><span class="badge badge-${issue.status}">${statusLabel}</span></div>
+    <div class="issue-row-votes">
+      ${!isArchived ? `<button class="vote-btn ${voted ? 'voted' : ''}" data-id="${issue.id}" title="${voted ? 'Remove vote' : 'Vote to prioritize'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+        ${issue.votes}
+      </button>` : `<span style="color:var(--text2);font-size:13px">${issue.votes}</span>`}
+    </div>
+    <div class="row-actions">
+      ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>` : ''}
+      ${(isOwner && !isArchived) ? `<button class="icon-btn privacy-toggle-btn ${isPrivate ? 'is-private' : ''}" data-id="${issue.id}" data-private="${isPrivate ? '1' : '0'}" title="${isPrivate ? 'Make public' : 'Make private'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>${isPrivate ? '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>' : '<path d="M7 11V7a5 5 0 0 1 9.9-1"/>'}</svg>
+      </button>` : ''}
+      ${(isSolved && !isArchived) ? `<button class="icon-btn archive-issue-btn" data-id="${issue.id}" title="Archive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </button>` : ''}
+      ${isArchived ? `<button class="icon-btn unarchive-issue-btn" data-id="${issue.id}" title="Unarchive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 10 14 12"/></svg>
+      </button>` : ''}
+      ${(!isArchived && !isSolved) ? `<button class="icon-btn delete-issue-btn" data-id="${issue.id}" title="Move to Solved">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </button>` : ''}
+    </div>
+  `;
+
+  // Owner cell with avatar
+  const ownerCell = row.querySelector('.issue-row-owner');
+  if (issue.owner_name) {
+    ownerCell.appendChild(avatar(issue.owner_name, issue.owner_picture, issue.owner_color, 22));
+    ownerCell.appendChild(document.createTextNode(issue.owner_name));
+  } else {
+    ownerCell.innerHTML = '<span style="color:var(--text2);font-size:13px">Unassigned</span>';
+  }
+
+  return row;
+}
+
 function renderIssueOwnerFilter() {
   const panel = qs('#issue-owner-filter-panel');
   const selected = new Set(state.issueOwnerFilter.map(Number));
@@ -546,8 +616,16 @@ function updateIssueOwnerFilterLabel() {
 
 function renderIssues() {
   const grid = qs('#issues-list');
+  const tableEl = qs('#issues-table');
+  const tableBody = qs('#issues-table-body');
   const empty = qs('#issues-empty');
+  const listMode = state.issueViewMode === 'list';
+  const container = listMode ? tableBody : grid;
+  const buildFn   = listMode ? buildIssueRow : buildIssueCard;
   grid.innerHTML = '';
+  tableBody.innerHTML = '';
+  grid.hidden = listMode;
+  tableEl.hidden = !listMode;
 
   // Scope everything (list + stats) to the current visibility tab
   const inScope = state.issues.filter(i =>
@@ -585,7 +663,7 @@ function renderIssues() {
       empty.classList.remove('hidden'); return;
     }
 
-    activeSolved.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+    activeSolved.forEach(issue => container.appendChild(buildFn(issue)));
 
     if (archivedSolved.length > 0) {
       const divider = document.createElement('div');
@@ -601,11 +679,11 @@ function renderIssues() {
         </span>
         <div class="archived-header-line"></div>
       `;
-      grid.appendChild(divider);
-      archivedSolved.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+      container.appendChild(divider);
+      archivedSolved.forEach(issue => container.appendChild(buildFn(issue)));
     }
   } else {
-    filtered.forEach(issue => grid.appendChild(buildIssueCard(issue)));
+    filtered.forEach(issue => container.appendChild(buildFn(issue)));
   }
 
   // ── Events ────────────────────────────────────────────────────────
@@ -689,6 +767,16 @@ qs('#issue-owner-filter-panel').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   const root = qs('#issue-owner-filter');
   if (!root.contains(e.target)) qs('#issue-owner-filter-panel').hidden = true;
+});
+
+/* Issue view-mode toggle (cards / list) */
+qsa('#issue-view-toggle .view-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    qsa('#issue-view-toggle .view-mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.issueViewMode = btn.dataset.mode;
+    renderIssues();
+  });
 });
 
 /* Issue visibility tabs (Public / Private) */
