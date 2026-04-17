@@ -104,7 +104,8 @@ app.get('/auth/google/callback', async (req, res) => {
       return res.redirect('/?error=unauthorized');
     }
 
-    // Find or create user in DB
+    // Find or create user in DB (wait for cold-start migrations first)
+    await dbReady;
     const user = await userQueries.findOrCreateByEmail(profile.email, profile.name, profile.picture);
 
     // Set stateless HMAC-signed cookie (works in serverless — no session store needed)
