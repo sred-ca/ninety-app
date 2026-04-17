@@ -386,8 +386,10 @@ async function loadIssues() {
 function buildIssueCard(issue) {
   const isArchived = !!issue.archived;
   const isSolved   = issue.status === 'solved';
+  const isPrivate  = !!issue.private;
+  const isOwner    = !!(state.currentUser && issue.owner_id === state.currentUser.id);
   const card = document.createElement('div');
-  card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''} ${isPrivate ? 'private' : ''}`;
 
   const voted = state.userVotes.includes(issue.id);
 
@@ -433,10 +435,28 @@ function buildIssueCard(issue) {
        </button>`
     : '';
 
+  // Privacy toggle: only the owner sees this control. Closed padlock when private,
+  // open padlock when public. Not shown on archived cards.
+  const privateBtn = (isOwner && !isArchived)
+    ? `<button class="icon-btn privacy-toggle-btn ${isPrivate ? 'is-private' : ''}" data-id="${issue.id}" data-private="${isPrivate ? '1' : '0'}" title="${isPrivate ? 'Make public' : 'Make private'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          ${isPrivate
+            ? '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+            : '<path d="M7 11V7a5 5 0 0 1 9.9-1"/>'}
+        </svg>
+       </button>`
+    : '';
+
+  // Small lock marker prepended to the title when private, so owners can scan at a glance.
+  const privateMark = isPrivate
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;margin-right:6px;vertical-align:-1px;opacity:.7"><rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
+    : '';
+
   card.innerHTML = `
     <div class="issue-card-top">
       <div class="issue-priority-dot ${issue.priority}"></div>
-      <div class="issue-title">${esc(issue.title)}</div>
+      <div class="issue-title">${privateMark}${esc(issue.title)}</div>
     </div>
     ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
     <div class="issue-card-meta-row">
@@ -457,6 +477,7 @@ function buildIssueCard(issue) {
         ${!isArchived ? `<button class="icon-btn edit-issue-btn" data-id="${issue.id}" title="Edit">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>` : ''}
+        ${privateBtn}
         ${archiveBtn}
         ${unarchiveBtn}
         ${!isArchived ? `<button class="icon-btn danger delete-issue-btn" data-id="${issue.id}" data-title="${esc(issue.title)}" title="Delete">
@@ -592,6 +613,15 @@ function renderIssues() {
       loadIssues();
     });
   });
+
+  qsa('.privacy-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const makePrivate = btn.dataset.private !== '1';
+      await api.put(`/api/issues/${btn.dataset.id}`, { private: makePrivate });
+      loadIssues();
+    });
+  });
 }
 
 /* Issue owner filter */
@@ -622,6 +652,7 @@ function openIssueModal(editId) {
   qs('#issue-priority').value = issue ? issue.priority : 'medium';
   qs('#issue-status').value = issue ? issue.status : 'in_progress';
   qs('#issue-status-group').style.display = issue ? 'flex' : 'none';
+  qs('#issue-private').checked = issue ? !!issue.private : false;
 
   // Due date: existing value or default to 5 business days from today
   qs('#issue-due-date').value = issue
@@ -646,6 +677,7 @@ qs('#save-issue-btn').addEventListener('click', async () => {
     priority: qs('#issue-priority').value,
     status: qs('#issue-status').value,
     due_date: qs('#issue-due-date').value || null,
+    private: qs('#issue-private').checked,
   };
   if (!body.title) { qs('#issue-title').focus(); return; }
   try {

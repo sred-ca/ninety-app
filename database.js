@@ -51,6 +51,7 @@ if (USE_PG) {
         status      TEXT NOT NULL DEFAULT 'in_progress',
         priority    TEXT NOT NULL DEFAULT 'medium',
         archived    BOOLEAN NOT NULL DEFAULT FALSE,
+        private     BOOLEAN NOT NULL DEFAULT FALSE,
         due_date    DATE,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -93,6 +94,7 @@ if (USE_PG) {
     await pool.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS private  BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
     `);
     // Rename legacy statuses to new names and fix column default
@@ -111,7 +113,7 @@ if (USE_PG) {
   `;
   const ISSUE_Q = `
     SELECT i.id, i.title, i.description, i.owner_id, i.status, i.priority,
-           i.archived, i.due_date, i.created_at, i.updated_at,
+           i.archived, i.private, i.due_date, i.created_at, i.updated_at,
            u.name AS owner_name, u.color AS owner_color,
            (SELECT COUNT(*)::int FROM issue_votes iv WHERE iv.issue_id = i.id) AS votes
     FROM issues i LEFT JOIN users u ON i.owner_id = u.id
@@ -175,30 +177,34 @@ if (USE_PG) {
   };
 
   const issueQueries = {
-    getAll: async (status) => {
+    // Private issues are visible only to their owner. Non-owners never see them —
+    // callers must pass currentUserId so the filter can be applied in SQL.
+    getAll: async (status, currentUserId) => {
+      const uid = currentUserId ?? 0; // 0 never matches a real user id
       // Solved tab: return ALL solved (including archived) so frontend can render them separately
       // All tab / other status tabs: hide archived issues
       if (status === 'solved') {
         const q = await pool.query(
-          `${ISSUE_Q} WHERE i.status='solved' ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`
+          `${ISSUE_Q} WHERE i.status='solved' AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`,
+          [uid]
         );
         return q.rows;
       }
       const q = status
-        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 AND NOT i.archived ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status])
-        : await pool.query(`${ISSUE_Q} WHERE NOT i.archived ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`);
+        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 AND NOT i.archived AND (NOT i.private OR i.owner_id=$2) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status, uid])
+        : await pool.query(`${ISSUE_Q} WHERE NOT i.archived AND (NOT i.private OR i.owner_id=$1) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [uid]);
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
-    create: async ({ title, description, owner_id, priority, due_date }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate }) => {
       const { rows } = await pool.query(
-        'INSERT INTO issues (title,description,owner_id,status,priority,due_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null]
+        'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null, !!isPrivate]
       );
       return issueQueries.getById(rows[0].id);
     },
     update: async (id, fields) => {
-      const allowed = ['title','description','owner_id','status','priority','archived','due_date'];
+      const allowed = ['title','description','owner_id','status','priority','archived','private','due_date'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return issueQueries.getById(id);
       const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
@@ -321,7 +327,7 @@ if (USE_PG) {
   function enrichIssue(i) {
     const o = i.owner_id ? db.users.find(u => u.id === i.owner_id) : null;
     const votes = db.issue_votes.filter(v => v.issue_id === i.id).length;
-    return { ...i, archived: !!i.archived, due_date: i.due_date || null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, votes };
+    return { ...i, archived: !!i.archived, private: !!i.private, due_date: i.due_date || null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, votes };
   }
 
   const p = v => Promise.resolve(v); // wrap sync results as promises
@@ -374,7 +380,11 @@ if (USE_PG) {
   };
 
   const issueQueries = {
-    getAll: async (status) => {
+    // Private issues are visible only to their owner. Non-owners never see them —
+    // callers must pass currentUserId so the filter can be applied.
+    getAll: async (status, currentUserId) => {
+      const uid = currentUserId ? +currentUserId : 0;
+      const visible = (i) => !i.private || i.owner_id === uid;
       const dueCmp = (a, b) => {
         if (!a.due_date && !b.due_date) return 0;
         if (!a.due_date) return 1;
@@ -384,26 +394,26 @@ if (USE_PG) {
       // Solved tab: return ALL solved (archived + non-archived), sorted archived last
       if (status === 'solved') {
         return db.issues
-          .filter(i => i.status === 'solved')
+          .filter(i => i.status === 'solved' && visible(i))
           .map(enrichIssue)
           .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
       }
       // All tab / other tabs: hide archived
       const list = status
-        ? db.issues.filter(i => i.status === status && !i.archived)
-        : db.issues.filter(i => !i.archived);
+        ? db.issues.filter(i => i.status === status && !i.archived && visible(i))
+        : db.issues.filter(i => !i.archived && visible(i));
       return list.map(enrichIssue).sort((a, b) => dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
-    create: async ({ title, description, owner_id, priority, due_date }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, status: 'in_progress', priority: priority || 'medium',
-        archived: false, due_date: due_date || null, created_at: nowStr(), updated_at: nowStr() };
+        archived: false, private: !!isPrivate, due_date: due_date || null, created_at: nowStr(), updated_at: nowStr() };
       db.issues.push(issue); persist(db); return enrichIssue(issue);
     },
     update: async (id, fields) => {
       const i = db.issues.find(i => i.id === +id); if (!i) return null;
-      ['title','description','owner_id','status','priority','archived','due_date'].forEach(k => { if (k in fields) i[k] = fields[k]; });
+      ['title','description','owner_id','status','priority','archived','private','due_date'].forEach(k => { if (k in fields) i[k] = fields[k]; });
       if ('owner_id' in fields && fields.owner_id) i.owner_id = +fields.owner_id;
       i.updated_at = nowStr(); persist(db); return enrichIssue(i);
     },

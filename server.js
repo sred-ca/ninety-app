@@ -167,11 +167,14 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
 
 // ── Issues ───────────────────────────────────────────────────────────────────
 app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
-app.get('/api/issues', wrap(async (req, res) => ok(res, await issueQueries.getAll(req.query.status))));
+app.get('/api/issues', wrap(async (req, res) => {
+  const currentUserId = readAuthCookie(req)?.userId;
+  ok(res, await issueQueries.getAll(req.query.status, currentUserId));
+}));
 app.post('/api/issues', wrap(async (req, res) => {
-  const { title, description, owner_id, priority, due_date } = req.body;
+  const { title, description, owner_id, priority, due_date, private: isPrivate } = req.body;
   if (!title) return fail(res, 'title is required');
-  ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date }));
+  ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate }));
 }));
 app.put('/api/issues/:id', wrap(async (req, res) => ok(res, await issueQueries.update(req.params.id, req.body))));
 app.delete('/api/issues/:id', wrap(async (req, res) => {
