@@ -11,7 +11,7 @@ const state = {
   my90Meetings: [],
   my90Votes: [],
   quarterFilter: '',
-  issueStatusFilter: '',
+  issueStatusFilter: 'in_progress',
   issueOwnerFilter: '',
   issueVisibilityFilter: 'public',
   pendingDelete: null,
