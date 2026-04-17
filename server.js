@@ -172,7 +172,8 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
 app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
 app.get('/api/issues', wrap(async (req, res) => {
   const currentUserId = readAuthCookie(req)?.userId;
-  ok(res, await issueQueries.getAll(req.query.status, currentUserId));
+  const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
+  ok(res, await issueQueries.getAll(req.query.status, currentUserId, includeArchived));
 }));
 app.post('/api/issues', wrap(async (req, res) => {
   const { title, description, owner_id, priority, due_date, private: isPrivate } = req.body;

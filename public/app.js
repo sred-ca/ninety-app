@@ -394,9 +394,10 @@ qs('#save-rock-btn').addEventListener('click', async () => {
    ════════════════════════════════════════════════════════════════════ */
 
 async function loadIssues() {
-  const url = state.issueStatusFilter ? `/api/issues?status=${state.issueStatusFilter}` : '/api/issues';
+  // Always fetch the full visible set (including archived) so the stats bar
+  // stays stable regardless of client-side status/owner filters.
   [state.issues, state.userVotes] = await Promise.all([
-    api.get(url),
+    api.get('/api/issues?include_archived=1'),
     state.currentUser ? api.get(`/api/issues/votes/${state.currentUser.id}`) : Promise.resolve([]),
   ]);
   renderIssues();
@@ -640,9 +641,18 @@ function renderIssues() {
 
   // Apply owner filter client-side (multi-select; empty = no filter)
   const ownerIds = state.issueOwnerFilter.map(Number);
-  const filtered = ownerIds.length
+  const ownerScoped = ownerIds.length
     ? inScope.filter(i => ownerIds.includes(i.owner_id))
     : inScope;
+
+  // Apply status filter client-side (so stats above remain stable)
+  // Non-solved tabs hide archived; solved tab keeps archived for the divider section.
+  const statusFilter = state.issueStatusFilter;
+  const filtered = statusFilter === 'solved'
+    ? ownerScoped.filter(i => i.status === 'solved')
+    : statusFilter
+      ? ownerScoped.filter(i => i.status === statusFilter && !i.archived)
+      : ownerScoped.filter(i => !i.archived);
 
   // Stats: exclude archived from counts; Total = all open (non-solved)
   const activeIssues = inScope.filter(i => !i.archived);
@@ -808,13 +818,13 @@ qsa('#issue-visibility-tabs .filter-tab').forEach(tab => {
   });
 });
 
-/* Issue filter tabs */
+/* Issue filter tabs (client-side; stats bar stays full) */
 qsa('#issue-filter-tabs .filter-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     qsa('#issue-filter-tabs .filter-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     state.issueStatusFilter = tab.dataset.status;
-    loadIssues();
+    renderIssues();
   });
 });
 

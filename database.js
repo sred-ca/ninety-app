@@ -181,10 +181,11 @@ if (USE_PG) {
   const issueQueries = {
     // Private issues are visible only to their owner. Non-owners never see them —
     // callers must pass currentUserId so the filter can be applied in SQL.
-    getAll: async (status, currentUserId) => {
+    // includeArchived=true returns archived rows too (for client-side filtering / stats).
+    getAll: async (status, currentUserId, includeArchived) => {
       const uid = currentUserId ?? 0; // 0 never matches a real user id
+      const archCond = includeArchived ? '' : 'AND NOT i.archived';
       // Solved tab: return ALL solved (including archived) so frontend can render them separately
-      // All tab / other status tabs: hide archived issues
       if (status === 'solved') {
         const q = await pool.query(
           `${ISSUE_Q} WHERE i.status='solved' AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`,
@@ -193,8 +194,8 @@ if (USE_PG) {
         return q.rows;
       }
       const q = status
-        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 AND NOT i.archived AND (NOT i.private OR i.owner_id=$2) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status, uid])
-        : await pool.query(`${ISSUE_Q} WHERE NOT i.archived AND (NOT i.private OR i.owner_id=$1) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [uid]);
+        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 ${archCond} AND (NOT i.private OR i.owner_id=$2) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status, uid])
+        : await pool.query(`${ISSUE_Q} WHERE 1=1 ${archCond} AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [uid]);
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
@@ -384,9 +385,11 @@ if (USE_PG) {
   const issueQueries = {
     // Private issues are visible only to their owner. Non-owners never see them —
     // callers must pass currentUserId so the filter can be applied.
-    getAll: async (status, currentUserId) => {
+    // includeArchived=true returns archived rows too (for client-side filtering / stats).
+    getAll: async (status, currentUserId, includeArchived) => {
       const uid = currentUserId ? +currentUserId : 0;
       const visible = (i) => !i.private || i.owner_id === uid;
+      const archOk = (i) => includeArchived || !i.archived;
       const dueCmp = (a, b) => {
         if (!a.due_date && !b.due_date) return 0;
         if (!a.due_date) return 1;
@@ -400,11 +403,12 @@ if (USE_PG) {
           .map(enrichIssue)
           .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
       }
-      // All tab / other tabs: hide archived
       const list = status
-        ? db.issues.filter(i => i.status === status && !i.archived && visible(i))
-        : db.issues.filter(i => !i.archived && visible(i));
-      return list.map(enrichIssue).sort((a, b) => dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
+        ? db.issues.filter(i => i.status === status && archOk(i) && visible(i))
+        : db.issues.filter(i => archOk(i) && visible(i));
+      return list
+        .map(enrichIssue)
+        .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
     create: async ({ title, description, owner_id, priority, due_date, private: isPrivate }) => {
