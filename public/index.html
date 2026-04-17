@@ -139,9 +139,13 @@
               <button class="filter-tab active" data-visibility="public">Public</button>
               <button class="filter-tab" data-visibility="private">Private</button>
             </div>
-            <select id="issue-owner-filter" class="select-input" style="min-width:130px">
-              <option value="">All Owners</option>
-            </select>
+            <div class="owner-multiselect" id="issue-owner-filter">
+              <button type="button" class="owner-multiselect-btn" id="issue-owner-filter-btn">
+                <span id="issue-owner-filter-label">All Owners</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="owner-multiselect-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="owner-multiselect-panel" id="issue-owner-filter-panel" hidden></div>
+            </div>
             <div class="filter-tabs" id="issue-filter-tabs">
               <button class="filter-tab" data-status="">All</button>
               <button class="filter-tab active" data-status="in_progress">In Progress</button>

@@ -868,6 +868,75 @@ textarea { resize: vertical; min-height: 72px; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
 
+/* ── Owner multiselect (To-Dos) ───────────────────────────────────── */
+.owner-multiselect {
+  position: relative;
+  min-width: 160px;
+}
+.owner-multiselect-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  padding: 9px 12px;
+  transition: border-color 0.15s;
+  width: 100%;
+  outline: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+.owner-multiselect-btn:hover { border-color: var(--accent); }
+.owner-multiselect-chevron { width: 14px; height: 14px; flex-shrink: 0; opacity: .7; }
+.owner-multiselect-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  padding: 6px;
+  z-index: 20;
+}
+.owner-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.owner-multiselect-option:hover { background: var(--surface3); }
+.owner-multiselect-option input { margin: 0; cursor: pointer; }
+.owner-multiselect-divider {
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+.owner-multiselect-clear {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 13px;
+  padding: 6px 10px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-radius: 4px;
+}
+.owner-multiselect-clear:hover { background: var(--surface3); color: var(--text); }
+
 /* ══════════════════════════════════════════════════════════════════
    MEETINGS VIEW
    ══════════════════════════════════════════════════════════════════ */

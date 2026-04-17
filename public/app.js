@@ -12,7 +12,7 @@ const state = {
   my90Votes: [],
   quarterFilter: '',
   issueStatusFilter: 'in_progress',
-  issueOwnerFilter: '',
+  issueOwnerFilter: [],
   issueVisibilityFilter: 'public',
   pendingDelete: null,
   // Meetings
@@ -513,11 +513,35 @@ function buildIssueCard(issue) {
 }
 
 function renderIssueOwnerFilter() {
-  const sel = qs('#issue-owner-filter');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">All Owners</option>' +
-    state.users.map(u => `<option value="${u.id}" ${cur == u.id ? 'selected' : ''}>${u.name}</option>`).join('');
-  sel.value = cur;
+  const panel = qs('#issue-owner-filter-panel');
+  const selected = new Set(state.issueOwnerFilter.map(Number));
+  panel.innerHTML =
+    state.users.map(u => `
+      <label class="owner-multiselect-option">
+        <input type="checkbox" data-user-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}/>
+        <span>${esc(u.name)}</span>
+      </label>
+    `).join('') +
+    `<div class="owner-multiselect-divider"></div>
+     <button type="button" class="owner-multiselect-clear" id="issue-owner-filter-clear">Clear selection</button>`;
+  updateIssueOwnerFilterLabel();
+}
+
+function updateIssueOwnerFilterLabel() {
+  const labelEl = qs('#issue-owner-filter-label');
+  const ids = state.issueOwnerFilter.map(Number);
+  if (ids.length === 0) { labelEl.textContent = 'All Owners'; return; }
+  if (ids.length === 1) {
+    const u = state.users.find(x => x.id === ids[0]);
+    labelEl.textContent = u ? u.name : '1 owner';
+    return;
+  }
+  if (ids.length === 2) {
+    const names = ids.map(id => state.users.find(x => x.id === id)?.name).filter(Boolean);
+    labelEl.textContent = names.join(', ');
+    return;
+  }
+  labelEl.textContent = `${ids.length} owners`;
 }
 
 function renderIssues() {
@@ -530,10 +554,10 @@ function renderIssues() {
     state.issueVisibilityFilter === 'private' ? i.private : !i.private
   );
 
-  // Apply owner filter client-side
-  const ownerFilter = state.issueOwnerFilter ? +state.issueOwnerFilter : null;
-  const filtered = ownerFilter
-    ? inScope.filter(i => i.owner_id === ownerFilter)
+  // Apply owner filter client-side (multi-select; empty = no filter)
+  const ownerIds = state.issueOwnerFilter.map(Number);
+  const filtered = ownerIds.length
+    ? inScope.filter(i => ownerIds.includes(i.owner_id))
     : inScope;
 
   // Stats: exclude archived from counts; Total excludes solved
@@ -641,10 +665,30 @@ function renderIssues() {
   });
 }
 
-/* Issue owner filter */
-qs('#issue-owner-filter').addEventListener('change', () => {
-  state.issueOwnerFilter = qs('#issue-owner-filter').value;
-  renderIssues();
+/* Issue owner multiselect */
+qs('#issue-owner-filter-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const panel = qs('#issue-owner-filter-panel');
+  panel.hidden = !panel.hidden;
+});
+qs('#issue-owner-filter-panel').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (e.target.matches('input[type=checkbox][data-user-id]')) {
+    const id = +e.target.dataset.userId;
+    const idx = state.issueOwnerFilter.indexOf(id);
+    if (e.target.checked && idx < 0) state.issueOwnerFilter.push(id);
+    if (!e.target.checked && idx >= 0) state.issueOwnerFilter.splice(idx, 1);
+    updateIssueOwnerFilterLabel();
+    renderIssues();
+  } else if (e.target.id === 'issue-owner-filter-clear') {
+    state.issueOwnerFilter = [];
+    renderIssueOwnerFilter();
+    renderIssues();
+  }
+});
+document.addEventListener('click', (e) => {
+  const root = qs('#issue-owner-filter');
+  if (!root.contains(e.target)) qs('#issue-owner-filter-panel').hidden = true;
 });
 
 /* Issue visibility tabs (Public / Private) */
