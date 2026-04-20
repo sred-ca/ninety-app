@@ -37,6 +37,10 @@ const state = {
     totalElapsed: 0,    // total seconds elapsed
     playing: false,
     interval: null,
+    attendees: [],
+    // To-dos panel: column filters + sort
+    todoFilters: { blocker: true, waiting_for: true, in_progress: true },
+    todoSort: { col: 'status', dir: 'asc' },
   },
   // Insights
   insightsSubTab: 'rocks',
@@ -1795,6 +1799,9 @@ function renderRunnerIssuesPanel(sec) {
   });
 }
 
+/* Status priority for the runner to-dos default sort (lower = higher priority). */
+const RUNNER_TODO_STATUS_RANK = { blocker: 0, waiting_for: 1, in_progress: 2 };
+
 function renderRunnerTodosPanel(sec) {
   const panel = qs('#runner-todos-panel');
   const list  = qs('#runner-todos-list');
@@ -1802,21 +1809,55 @@ function renderRunnerTodosPanel(sec) {
   panel.hidden = false;
 
   const attendeeIds = new Set((state.runner.attendees || []).map(a => a.id));
-  // Flat list of every attendee's open (non-solved, non-archived) to-dos, sorted by owner name.
-  const items = (state.issues || [])
-    .filter(i => attendeeIds.has(i.owner_id) && !i.archived && i.status !== 'solved')
-    .sort((a, b) => (a.owner_name || '').localeCompare(b.owner_name || '') || b.created_at.localeCompare(a.created_at));
 
   if (attendeeIds.size === 0) {
+    list.innerHTML = '';
+    renderRunnerTodosHeader(0, 0);
     list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 2px">No attendees on this meeting.</div>';
     return;
   }
+
+  // Base set: every attendee's open (non-solved, non-archived) to-dos in the
+  // 3 statuses we surface in meetings.
+  const allOpen = (state.issues || []).filter(i =>
+    attendeeIds.has(i.owner_id)
+    && !i.archived
+    && (i.status === 'blocker' || i.status === 'waiting_for' || i.status === 'in_progress')
+  );
+
+  // Apply status filter chips.
+  const filters = state.runner.todoFilters;
+  const items = allOpen.filter(i => filters[i.status]);
+
+  // Sort.
+  const { col, dir } = state.runner.todoSort;
+  const flip = dir === 'desc' ? -1 : 1;
+  items.sort((a, b) => {
+    if (col === 'status') {
+      const sRank = (RUNNER_TODO_STATUS_RANK[a.status] - RUNNER_TODO_STATUS_RANK[b.status]);
+      if (sRank !== 0) return sRank * flip;
+      // Secondary: owner name (ascending regardless of primary direction)
+      return (a.owner_name || '').localeCompare(b.owner_name || '');
+    }
+    if (col === 'owner') {
+      const o = (a.owner_name || '').localeCompare(b.owner_name || '');
+      if (o !== 0) return o * flip;
+      return RUNNER_TODO_STATUS_RANK[a.status] - RUNNER_TODO_STATUS_RANK[b.status];
+    }
+    if (col === 'title') {
+      return (a.title || '').localeCompare(b.title || '') * flip;
+    }
+    return 0;
+  });
+
+  renderRunnerTodosHeader(items.length, allOpen.length);
+
+  list.innerHTML = '';
   if (items.length === 0) {
-    list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 2px">No open to-dos for the attendees.</div>';
+    list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 2px">No to-dos match the current filters.</div>';
     return;
   }
 
-  list.innerHTML = '';
   items.forEach(i => {
     const row = document.createElement('div');
     row.className = 'runner-issue-row';
@@ -1841,6 +1882,62 @@ function renderRunnerTodosPanel(sec) {
       e.stopPropagation();
       await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' });
       await loadIssues();
+      updateRunnerDisplay();
+    });
+  });
+}
+
+function renderRunnerTodosHeader(shown, total) {
+  const host = qs('#runner-todos-controls');
+  if (!host) return;
+  const { col, dir } = state.runner.todoSort;
+  const arrow = (c) => col === c ? (dir === 'desc' ? ' ▼' : ' ▲') : '';
+  const filters = state.runner.todoFilters;
+  const countsByStatus = { blocker: 0, waiting_for: 0, in_progress: 0 };
+  const attendeeIds = new Set((state.runner.attendees || []).map(a => a.id));
+  (state.issues || []).forEach(i => {
+    if (attendeeIds.has(i.owner_id) && !i.archived && countsByStatus[i.status] !== undefined) {
+      countsByStatus[i.status]++;
+    }
+  });
+
+  host.innerHTML = `
+    <div class="runner-todos-filters">
+      <button type="button" class="runner-todo-filter-chip ${filters.blocker ? 'active' : ''}" data-status="blocker">
+        <span class="runner-todo-filter-dot blocker"></span> Blockers (${countsByStatus.blocker})
+      </button>
+      <button type="button" class="runner-todo-filter-chip ${filters.waiting_for ? 'active' : ''}" data-status="waiting_for">
+        <span class="runner-todo-filter-dot waiting_for"></span> Waiting For (${countsByStatus.waiting_for})
+      </button>
+      <button type="button" class="runner-todo-filter-chip ${filters.in_progress ? 'active' : ''}" data-status="in_progress">
+        <span class="runner-todo-filter-dot in_progress"></span> In Progress (${countsByStatus.in_progress})
+      </button>
+      <span class="runner-todo-count">${shown} of ${total}</span>
+    </div>
+    <div class="runner-todos-column-header">
+      <div></div>
+      <button type="button" class="runner-todo-sort-btn" data-col="title">Title${arrow('title')}</button>
+      <button type="button" class="runner-todo-sort-btn" data-col="owner">Owner${arrow('owner')}</button>
+      <button type="button" class="runner-todo-sort-btn" data-col="status">Status${arrow('status')}</button>
+    </div>
+  `;
+
+  host.querySelectorAll('.runner-todo-filter-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = btn.dataset.status;
+      state.runner.todoFilters[s] = !state.runner.todoFilters[s];
+      updateRunnerDisplay();
+    });
+  });
+  host.querySelectorAll('.runner-todo-sort-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const c = btn.dataset.col;
+      if (state.runner.todoSort.col === c) {
+        state.runner.todoSort.dir = state.runner.todoSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.runner.todoSort.col = c;
+        state.runner.todoSort.dir = 'asc';
+      }
       updateRunnerDisplay();
     });
   });
