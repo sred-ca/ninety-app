@@ -771,7 +771,18 @@ function renderIssues() {
   });
 }
 
-/* Issue owner multiselect */
+/* Issue owner multiselect (selection persisted to localStorage) */
+const ISSUE_OWNER_FILTER_KEY = 'ninety.issueOwnerFilter';
+{
+  try {
+    const saved = JSON.parse(localStorage.getItem(ISSUE_OWNER_FILTER_KEY) || 'null');
+    if (Array.isArray(saved)) state.issueOwnerFilter = saved.map(Number).filter(Number.isFinite);
+  } catch {}
+}
+function saveIssueOwnerFilter() {
+  try { localStorage.setItem(ISSUE_OWNER_FILTER_KEY, JSON.stringify(state.issueOwnerFilter)); } catch {}
+}
+
 qs('#issue-owner-filter-btn').addEventListener('click', (e) => {
   e.stopPropagation();
   const panel = qs('#issue-owner-filter-panel');
@@ -784,10 +795,12 @@ qs('#issue-owner-filter-panel').addEventListener('click', (e) => {
     const idx = state.issueOwnerFilter.indexOf(id);
     if (e.target.checked && idx < 0) state.issueOwnerFilter.push(id);
     if (!e.target.checked && idx >= 0) state.issueOwnerFilter.splice(idx, 1);
+    saveIssueOwnerFilter();
     updateIssueOwnerFilterLabel();
     renderIssues();
   } else if (e.target.id === 'issue-owner-filter-clear') {
     state.issueOwnerFilter = [];
+    saveIssueOwnerFilter();
     renderIssueOwnerFilter();
     renderIssues();
   }
