@@ -213,13 +213,6 @@
               </button>
               <div class="owner-multiselect-panel" id="team-issue-owner-filter-panel" hidden></div>
             </div>
-            <div class="filter-tabs" id="team-issue-filter-tabs">
-              <button class="filter-tab" data-status="">All</button>
-              <button class="filter-tab active" data-status="in_progress">In Progress</button>
-              <button class="filter-tab" data-status="waiting_for">Waiting For</button>
-              <button class="filter-tab" data-status="blocker">Blocker</button>
-              <button class="filter-tab" data-status="solved">Solved</button>
-            </div>
             <div class="view-mode-toggle" id="team-issue-view-toggle">
               <button type="button" class="view-mode-btn active" data-mode="cards" title="Card view">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -235,15 +228,12 @@
           </div>
         </div>
 
-        <div class="stats-bar" id="team-issues-stats"></div>
-
         <div id="team-issues-list" class="issues-grid"></div>
         <div id="team-issues-table" class="card" hidden>
           <div class="table-header team-issue-table-header">
             <span class="th">Rank</span>
             <span class="th">Issue</span>
             <span class="th">Owner</span>
-            <span class="th">Status</span>
             <span class="th"></span>
           </div>
           <div id="team-issues-table-body" class="table-body"></div>
@@ -716,15 +706,6 @@
               <option value="long_term">Long Term</option>
             </select>
           </div>
-        </div>
-        <div class="form-group" id="team-issue-status-group" style="display:none">
-          <label>Status</label>
-          <select id="team-issue-status" class="select-input">
-            <option value="in_progress">In Progress</option>
-            <option value="waiting_for">Waiting For</option>
-            <option value="blocker">Blocker</option>
-            <option value="solved">Solved</option>
-          </select>
         </div>
       </div>
       <div class="modal-footer">

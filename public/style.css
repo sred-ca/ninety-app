@@ -915,13 +915,12 @@ textarea { resize: vertical; min-height: 72px; }
 
 /* ── Issues list view rows (Team Issues) ──────────────────────────── */
 .team-issue-table-header {
-  grid-template-columns: 80px minmax(0,1fr) 160px 110px 140px;
+  grid-template-columns: 120px minmax(0,1fr) 180px 80px;
 }
 .team-issue-row {
-  grid-template-columns: 80px minmax(0,1fr) 160px 110px 140px;
+  grid-template-columns: 120px minmax(0,1fr) 180px 80px;
   gap: 12px;
 }
-.team-issue-row.solved .issue-row-title { color: var(--text2); text-decoration: line-through; }
 .team-issue-row.archived { opacity: 0.6; }
 
 /* ── Meeting runner: issues panel ─────────────────────────────────── */
@@ -945,7 +944,7 @@ textarea { resize: vertical; min-height: 72px; }
 .runner-issues-list { display: flex; flex-direction: column; gap: 10px; }
 .runner-issue-row {
   display: grid;
-  grid-template-columns: 40px minmax(0,1fr) auto auto auto;
+  grid-template-columns: 40px minmax(0,1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 10px 12px;

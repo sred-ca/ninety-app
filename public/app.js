@@ -18,7 +18,6 @@ const state = {
   // Team Issues (IDS discussion items — distinct from the "To-Dos" feature above)
   teamIssues: [],
   teamIssueHorizonFilter: 'short_term',
-  teamIssueStatusFilter: 'in_progress',
   teamIssueOwnerFilter: [],
   teamIssueViewMode: 'cards',
   pendingDelete: null,
@@ -930,9 +929,8 @@ function rankChipSelector(issueId, currentRank) {
 
 function buildTeamIssueCard(issue) {
   const isArchived = !!issue.archived;
-  const isSolved   = issue.status === 'solved';
   const card = document.createElement('div');
-  card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  card.className = `issue-card ${isArchived ? 'archived' : ''}`;
   if (!isArchived) {
     card.style.cursor = 'pointer';
     card.addEventListener('click', () => openTeamIssueModal(issue.id));
@@ -951,22 +949,11 @@ function buildTeamIssueCard(issue) {
       ${issue.owner_name ? `<span class="issue-owner-chip"></span>` : ''}
     </div>
     <div class="issue-card-bottom">
-      <div class="issue-meta">
-        <span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span>
-      </div>
+      <div class="issue-meta"></div>
       <div class="issue-actions">
         ${showRankChips ? rankChipSelector(issue.id, issue.top_rank) : ''}
-        ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+        ${!isArchived ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        </button>` : ''}
-        ${(isSolved && !isArchived) ? `<button class="icon-btn archive-team-issue-btn" data-id="${issue.id}" title="Archive">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        </button>` : ''}
-        ${isArchived ? `<button class="icon-btn unarchive-team-issue-btn" data-id="${issue.id}" title="Unarchive">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 10 14 12"/></svg>
-        </button>` : ''}
-        ${(!isArchived && !isSolved) ? `<button class="icon-btn delete-team-issue-btn" data-id="${issue.id}" title="Move to Solved">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>` : ''}
       </div>
     </div>
@@ -986,9 +973,8 @@ function buildTeamIssueCard(issue) {
 
 function buildTeamIssueRow(issue) {
   const isArchived = !!issue.archived;
-  const isSolved   = issue.status === 'solved';
   const row = document.createElement('div');
-  row.className = `table-row team-issue-row ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  row.className = `table-row team-issue-row ${isArchived ? 'archived' : ''}`;
   if (!isArchived) {
     row.style.cursor = 'pointer';
     row.addEventListener('click', () => openTeamIssueModal(issue.id));
@@ -1002,19 +988,9 @@ function buildTeamIssueRow(issue) {
     <div>${rankCell}</div>
     <div class="issue-row-title">${esc(issue.title)}</div>
     <div class="issue-row-owner"></div>
-    <div><span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span></div>
     <div class="row-actions">
-      ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+      ${!isArchived ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </button>` : ''}
-      ${(isSolved && !isArchived) ? `<button class="icon-btn archive-team-issue-btn" data-id="${issue.id}" title="Archive">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-      </button>` : ''}
-      ${isArchived ? `<button class="icon-btn unarchive-team-issue-btn" data-id="${issue.id}" title="Unarchive">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 10 14 12"/></svg>
-      </button>` : ''}
-      ${(!isArchived && !isSolved) ? `<button class="icon-btn delete-team-issue-btn" data-id="${issue.id}" title="Move to Solved">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
       </button>` : ''}
     </div>
   `;
@@ -1075,66 +1051,26 @@ function renderTeamIssues() {
   grid.hidden = listMode;
   tableEl.hidden = !listMode;
 
-  // Scope by horizon tab
-  const inScope = state.teamIssues.filter(t => t.horizon === state.teamIssueHorizonFilter);
+  // Scope by horizon tab; hide solved + archived (the only "done" signal now
+  // that issues don't expose a status concept in the UI).
+  const inScope = state.teamIssues.filter(t =>
+    t.horizon === state.teamIssueHorizonFilter && !t.archived && t.status !== 'solved'
+  );
 
   // Owner filter (multi-select)
   const ownerIds = state.teamIssueOwnerFilter.map(Number);
-  const ownerScoped = ownerIds.length
+  const filtered = ownerIds.length
     ? inScope.filter(t => ownerIds.includes(t.owner_id))
     : inScope;
-
-  // Status filter
-  const statusFilter = state.teamIssueStatusFilter;
-  const filtered = statusFilter === 'solved'
-    ? ownerScoped.filter(t => t.status === 'solved')
-    : statusFilter
-      ? ownerScoped.filter(t => t.status === statusFilter && !t.archived)
-      : ownerScoped.filter(t => !t.archived);
-
-  // Stats (stable across owner/status; scoped only to horizon)
-  const activeScope = inScope.filter(t => !t.archived);
-  const inProg  = activeScope.filter(t => t.status === 'in_progress').length;
-  const waiting = activeScope.filter(t => t.status === 'waiting_for').length;
-  const block   = activeScope.filter(t => t.status === 'blocker').length;
-  const solved  = activeScope.filter(t => t.status === 'solved').length;
-  const total   = inProg + waiting + block;
-  qs('#team-issues-stats').innerHTML = `
-    <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
-    <div class="stat-card accent"><span class="stat-label">In Progress</span><span class="stat-value">${inProg}</span></div>
-    <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waiting}</span></div>
-    <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${block}</span></div>
-    <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
-  `;
 
   if (filtered.length === 0) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
   filtered.forEach(t => container.appendChild(buildFn(t)));
 
-  // Event wiring (scoped to current container)
+  // Event wiring (scoped to current container). Solve = soft-remove from view
+  // (we still write status='solved' server-side so the row drops out of the list).
   container.querySelectorAll('.solve-team-issue-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await api.put(`/api/team-issues/${btn.dataset.id}`, { status: 'solved' });
-      loadTeamIssues();
-    });
-  });
-  container.querySelectorAll('.archive-team-issue-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await api.put(`/api/team-issues/${btn.dataset.id}`, { archived: true });
-      loadTeamIssues();
-    });
-  });
-  container.querySelectorAll('.unarchive-team-issue-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await api.put(`/api/team-issues/${btn.dataset.id}`, { archived: false });
-      loadTeamIssues();
-    });
-  });
-  container.querySelectorAll('.delete-team-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await api.put(`/api/team-issues/${btn.dataset.id}`, { status: 'solved' });
@@ -1166,8 +1102,6 @@ function openTeamIssueModal(editId) {
   qs('#team-issue-title').value = issue ? issue.title : '';
   qs('#team-issue-description').value = issue ? (issue.description || '') : '';
   qs('#team-issue-horizon').value = issue ? issue.horizon : state.teamIssueHorizonFilter;
-  qs('#team-issue-status').value = issue ? issue.status : 'in_progress';
-  qs('#team-issue-status-group').style.display = issue ? 'flex' : 'none';
 
   const ownerSel = qs('#team-issue-owner');
   ownerSel.innerHTML = '<option value="">Unassigned</option>' +
@@ -1185,15 +1119,12 @@ qs('#save-team-issue-btn').addEventListener('click', async () => {
     description: qs('#team-issue-description').value.trim(),
     owner_id: qs('#team-issue-owner').value || null,
     horizon: qs('#team-issue-horizon').value,
-    status: qs('#team-issue-status').value,
   };
   if (!body.title) { qs('#team-issue-title').focus(); return; }
   try {
     if (id) {
       await api.put(`/api/team-issues/${id}`, body);
     } else {
-      // Don't send status on create — server defaults to in_progress
-      delete body.status;
       await api.post('/api/team-issues', body);
     }
     closeModal('team-issue-modal');
@@ -1207,16 +1138,6 @@ qsa('#team-issue-horizon-tabs .filter-tab').forEach(tab => {
     qsa('#team-issue-horizon-tabs .filter-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     state.teamIssueHorizonFilter = tab.dataset.horizon;
-    renderTeamIssues();
-  });
-});
-
-/* ── Status tabs ──────────────────────────────────────────────────── */
-qsa('#team-issue-filter-tabs .filter-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    qsa('#team-issue-filter-tabs .filter-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    state.teamIssueStatusFilter = tab.dataset.status;
     renderTeamIssues();
   });
 });
@@ -1697,7 +1618,6 @@ function renderRunnerIssuesPanel(sec) {
       <div>${rankBadge(t.top_rank)}</div>
       <div class="runner-issue-title">${esc(t.title)}</div>
       <div class="runner-issue-owner"></div>
-      <div><span class="badge badge-${t.status}">${issueStatusLabel(t.status)}</span></div>
       <div style="display:flex;align-items:center;gap:6px">
         ${rankChipSelector(t.id, t.top_rank)}
         <button class="icon-btn runner-solve-team-issue-btn" data-id="${t.id}" title="Mark as Solved">
