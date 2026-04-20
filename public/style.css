@@ -869,6 +869,93 @@ textarea { resize: vertical; min-height: 72px; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
 
+/* ── Rank badges + selector (Team Issues) ────────────────────────── */
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.rank-badge.empty {
+  background: transparent;
+  color: var(--text2);
+  border: 1px dashed var(--border2);
+  font-weight: 500;
+}
+.rank-chip-selector {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.rank-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--border2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.rank-chip:hover { border-color: var(--accent); color: var(--text); }
+.rank-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+/* ── Issues list view rows (Team Issues) ──────────────────────────── */
+.team-issue-table-header {
+  grid-template-columns: 80px minmax(0,1fr) 160px 110px 140px;
+}
+.team-issue-row {
+  grid-template-columns: 80px minmax(0,1fr) 160px 110px 140px;
+  gap: 12px;
+}
+.team-issue-row.solved .issue-row-title { color: var(--text2); text-decoration: line-through; }
+.team-issue-row.archived { opacity: 0.6; }
+
+/* ── Meeting runner: issues panel ─────────────────────────────────── */
+.runner-issues-panel {
+  margin-top: 24px;
+  width: 100%;
+  max-width: 760px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+}
+.runner-issues-header {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+.runner-issues-list { display: flex; flex-direction: column; gap: 10px; }
+.runner-issue-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.runner-issue-row.solved .runner-issue-title { color: var(--text2); text-decoration: line-through; }
+.runner-issue-title { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── View-mode toggle (To-Dos) ────────────────────────────────────── */
 .view-mode-toggle {
   display: inline-flex;

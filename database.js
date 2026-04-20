@@ -90,6 +90,20 @@ if (USE_PG) {
         sections_snapshot JSONB,
         created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS team_issues (
+        id          SERIAL PRIMARY KEY,
+        title       TEXT NOT NULL,
+        description TEXT,
+        owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        horizon     TEXT NOT NULL DEFAULT 'short_term',
+        status      TEXT NOT NULL DEFAULT 'in_progress',
+        archived    BOOLEAN NOT NULL DEFAULT FALSE,
+        top_rank    SMALLINT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (top_rank IS NULL OR top_rank BETWEEN 1 AND 3)
+      );
     `);
     // Migrate existing tables that may lack newer columns
     await pool.query(`
@@ -98,6 +112,7 @@ if (USE_PG) {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS private  BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
+      ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_issues BOOLEAN NOT NULL DEFAULT FALSE;
     `);
     // Rename legacy statuses to new names and fix column default
     await pool.query(`
@@ -241,12 +256,12 @@ if (USE_PG) {
     create: async ({ title }) => (await pool.query('INSERT INTO agendas (title) VALUES ($1) RETURNING *', [title])).rows[0],
     update: async (id, { title }) => (await pool.query('UPDATE agendas SET title=$1 WHERE id=$2 RETURNING *', [title, id])).rows[0] ?? null,
     delete: async (id) => pool.query('DELETE FROM agendas WHERE id=$1', [id]),
-    addSection: async (agendaId, { name, duration_minutes, visible, sort_order }) => (await pool.query(
-      'INSERT INTO agenda_sections (agenda_id,name,duration_minutes,visible,sort_order) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [agendaId, name, duration_minutes ?? 5, visible !== false, sort_order ?? 0]
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues }) => (await pool.query(
+      'INSERT INTO agenda_sections (agenda_id,name,duration_minutes,visible,sort_order,shows_issues) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [agendaId, name, duration_minutes ?? 5, visible !== false, sort_order ?? 0, !!shows_issues]
     )).rows[0],
     updateSection: async (id, fields) => {
-      const allowed = ['name','duration_minutes','visible','sort_order'];
+      const allowed = ['name','duration_minutes','visible','sort_order','shows_issues'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return null;
       const sets = keys.map((k,i) => `${k}=$${i+1}`).join(', ');
@@ -280,7 +295,65 @@ if (USE_PG) {
     delete: async (id) => pool.query('DELETE FROM meetings WHERE id=$1', [id]),
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
+  const TEAM_ISSUE_Q = `
+    SELECT ti.*, u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
+    FROM team_issues ti LEFT JOIN users u ON ti.owner_id = u.id
+  `;
+  const teamIssueQueries = {
+    getAll: async ({ horizon, status, includeArchived } = {}) => {
+      const where = [];
+      const params = [];
+      if (horizon)            { params.push(horizon); where.push(`ti.horizon=$${params.length}`); }
+      if (status)             { params.push(status);  where.push(`ti.status=$${params.length}`); }
+      if (!includeArchived)   { where.push('NOT ti.archived'); }
+      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const q = await pool.query(
+        `${TEAM_ISSUE_Q} ${whereSql} ORDER BY ti.archived ASC, ti.top_rank ASC NULLS LAST, ti.created_at DESC`,
+        params
+      );
+      return q.rows;
+    },
+    getById: async (id) => (await pool.query(`${TEAM_ISSUE_Q} WHERE ti.id=$1`, [id])).rows[0] ?? null,
+    create: async ({ title, description, owner_id, horizon }) => {
+      const { rows } = await pool.query(
+        'INSERT INTO team_issues (title,description,owner_id,horizon) VALUES ($1,$2,$3,$4) RETURNING id',
+        [title, description || null, owner_id || null, horizon || 'short_term']
+      );
+      return teamIssueQueries.getById(rows[0].id);
+    },
+    update: async (id, fields) => {
+      const allowed = ['title','description','owner_id','horizon','status','archived'];
+      const keys = allowed.filter(k => k in fields);
+      if (!keys.length) return teamIssueQueries.getById(id);
+      const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
+      await pool.query(
+        `UPDATE team_issues SET ${sets}, updated_at=NOW() WHERE id=$${keys.length + 1}`,
+        [...keys.map(k => fields[k]), id]
+      );
+      return teamIssueQueries.getById(id);
+    },
+    delete: async (id) => pool.query('DELETE FROM team_issues WHERE id=$1', [id]),
+    // Atomically set rank on one issue, clearing any other issue currently at that rank.
+    setRank: async (id, rank) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        if (rank != null) {
+          await client.query('UPDATE team_issues SET top_rank=NULL, updated_at=NOW() WHERE top_rank=$1 AND id<>$2', [rank, id]);
+        }
+        await client.query('UPDATE team_issues SET top_rank=$1, updated_at=NOW() WHERE id=$2', [rank, id]);
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      return teamIssueQueries.getById(id);
+    },
+  };
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries };
 
 } else {
 
@@ -442,10 +515,17 @@ if (USE_PG) {
   if (!db.agendas)       { db.agendas = []; }
   if (!db.agenda_sections) { db.agenda_sections = []; }
   if (!db.meetings)      { db.meetings = []; }
+  if (!db.team_issues)   { db.team_issues = []; }
   if (!db._seq.agendas)  { db._seq.agendas = 0; }
   if (!db._seq.agenda_sections) { db._seq.agenda_sections = 0; }
   if (!db._seq.meetings) { db._seq.meetings = 0; }
+  if (!db._seq.team_issues) { db._seq.team_issues = 0; }
   persist(db);
+
+  function enrichTeamIssue(ti) {
+    const o = ti.owner_id ? db.users.find(u => u.id === ti.owner_id) : null;
+    return { ...ti, archived: !!ti.archived, top_rank: ti.top_rank ?? null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, owner_picture: o?.picture ?? null };
+  }
 
   const agendaQueries = {
     getAll: async () => [...db.agendas].sort((a,b) => b.created_at.localeCompare(a.created_at)),
@@ -464,13 +544,13 @@ if (USE_PG) {
       db.agenda_sections = db.agenda_sections.filter(s => s.agenda_id !== +id);
       persist(db);
     },
-    addSection: async (agendaId, { name, duration_minutes, visible, sort_order }) => {
-      const s = { id: nextId('agenda_sections'), agenda_id: +agendaId, name, duration_minutes: duration_minutes ?? 5, visible: visible !== false, sort_order: sort_order ?? 0 };
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues }) => {
+      const s = { id: nextId('agenda_sections'), agenda_id: +agendaId, name, duration_minutes: duration_minutes ?? 5, visible: visible !== false, sort_order: sort_order ?? 0, shows_issues: !!shows_issues };
       db.agenda_sections.push(s); persist(db); return s;
     },
     updateSection: async (id, fields) => {
       const s = db.agenda_sections.find(s => s.id === +id); if (!s) return null;
-      ['name','duration_minutes','visible','sort_order'].forEach(k => { if (k in fields) s[k] = fields[k]; });
+      ['name','duration_minutes','visible','sort_order','shows_issues'].forEach(k => { if (k in fields) s[k] = fields[k]; });
       persist(db); return s;
     },
     deleteSection: async (id) => { db.agenda_sections = db.agenda_sections.filter(s => s.id !== +id); persist(db); },
@@ -494,5 +574,57 @@ if (USE_PG) {
     delete: async (id) => { db.meetings = db.meetings.filter(m => m.id !== +id); persist(db); },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries };
+  const teamIssueQueries = {
+    getAll: async ({ horizon, status, includeArchived } = {}) => {
+      let list = db.team_issues;
+      if (horizon) list = list.filter(t => t.horizon === horizon);
+      if (status)  list = list.filter(t => t.status === status);
+      if (!includeArchived) list = list.filter(t => !t.archived);
+      return list
+        .map(enrichTeamIssue)
+        .sort((a, b) => Number(!!a.archived) - Number(!!b.archived)
+          || (a.top_rank ?? 99) - (b.top_rank ?? 99)
+          || b.created_at.localeCompare(a.created_at));
+    },
+    getById: async (id) => {
+      const t = db.team_issues.find(t => t.id === +id);
+      return t ? enrichTeamIssue(t) : null;
+    },
+    create: async ({ title, description, owner_id, horizon }) => {
+      const t = {
+        id: nextId('team_issues'),
+        title,
+        description: description || null,
+        owner_id: owner_id ? +owner_id : null,
+        horizon: horizon || 'short_term',
+        status: 'in_progress',
+        archived: false,
+        top_rank: null,
+        created_at: nowStr(),
+        updated_at: nowStr(),
+      };
+      db.team_issues.push(t); persist(db); return enrichTeamIssue(t);
+    },
+    update: async (id, fields) => {
+      const t = db.team_issues.find(t => t.id === +id); if (!t) return null;
+      ['title','description','owner_id','horizon','status','archived'].forEach(k => { if (k in fields) t[k] = fields[k]; });
+      if ('owner_id' in fields && fields.owner_id) t.owner_id = +fields.owner_id;
+      t.updated_at = nowStr(); persist(db); return enrichTeamIssue(t);
+    },
+    delete: async (id) => { db.team_issues = db.team_issues.filter(t => t.id !== +id); persist(db); },
+    setRank: async (id, rank) => {
+      const t = db.team_issues.find(t => t.id === +id); if (!t) return null;
+      if (rank != null) {
+        db.team_issues.forEach(other => {
+          if (other.id !== +id && other.top_rank === rank) {
+            other.top_rank = null; other.updated_at = nowStr();
+          }
+        });
+      }
+      t.top_rank = rank; t.updated_at = nowStr(); persist(db);
+      return enrichTeamIssue(t);
+    },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries };
 }

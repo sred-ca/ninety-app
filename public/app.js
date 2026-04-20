@@ -15,6 +15,12 @@ const state = {
   issueOwnerFilter: [],
   issueVisibilityFilter: 'public',
   issueViewMode: 'cards',
+  // Team Issues (IDS discussion items — distinct from the "To-Dos" feature above)
+  teamIssues: [],
+  teamIssueHorizonFilter: 'short_term',
+  teamIssueStatusFilter: 'in_progress',
+  teamIssueOwnerFilter: [],
+  teamIssueViewMode: 'cards',
   pendingDelete: null,
   // Meetings
   agendas: [],
@@ -181,6 +187,7 @@ function closeModal(id) { qs(`#${id}`).classList.remove('active'); }
 async function loadUsers() {
   state.users = await api.get('/api/users');
   renderIssueOwnerFilter();
+  renderTeamIssueOwnerFilter();
 }
 
 function showLoginScreen(errorMsg) {
@@ -894,10 +901,371 @@ qs('#confirm-delete-btn').addEventListener('click', async () => {
   try {
     if (type === 'rock')    { await api.del(`/api/rocks/${id}`);    closeModal('confirm-modal'); loadRocks(); }
     else if (type === 'issue')   { await api.del(`/api/issues/${id}`);   closeModal('confirm-modal'); loadIssues(); }
+    else if (type === 'team-issue') { await api.del(`/api/team-issues/${id}`); closeModal('confirm-modal'); loadTeamIssues(); }
     else if (type === 'agenda')  { await api.del(`/api/agendas/${id}`);  closeModal('confirm-modal'); loadAgendas(); }
     else if (type === 'meeting') { await api.del(`/api/meetings/${id}`); closeModal('confirm-modal'); loadMeetings(); }
   } catch (e) { alert(e.message); }
   state.pendingDelete = null;
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   TEAM ISSUES (IDS-style discussion items; distinct from To-Dos)
+   ════════════════════════════════════════════════════════════════════ */
+
+async function loadTeamIssues() {
+  state.teamIssues = await api.get('/api/team-issues?include_archived=1');
+  renderTeamIssues();
+}
+
+function rankBadge(rank) {
+  if (rank == null) return '<span class="rank-badge empty">—</span>';
+  return `<span class="rank-badge">${rank}</span>`;
+}
+
+function rankChipSelector(issueId, currentRank) {
+  return `<div class="rank-chip-selector" data-issue-id="${issueId}">
+    ${[1,2,3].map(r => `<button type="button" class="rank-chip ${currentRank === r ? 'active' : ''}" data-rank="${r}" title="Rank ${r}">${r}</button>`).join('')}
+  </div>`;
+}
+
+function buildTeamIssueCard(issue) {
+  const isArchived = !!issue.archived;
+  const isSolved   = issue.status === 'solved';
+  const card = document.createElement('div');
+  card.className = `issue-card ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  if (!isArchived) {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => openTeamIssueModal(issue.id));
+  }
+
+  const showRankChips = !isArchived && issue.horizon === 'short_term';
+  const rankIndicator = issue.horizon === 'short_term' ? rankBadge(issue.top_rank) : '';
+
+  card.innerHTML = `
+    <div class="issue-card-top">
+      ${rankIndicator ? `<div style="margin-right:8px;flex-shrink:0">${rankIndicator}</div>` : ''}
+      <div class="issue-title">${esc(issue.title)}</div>
+    </div>
+    ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
+    <div class="issue-card-meta-row">
+      ${issue.owner_name ? `<span class="issue-owner-chip"></span>` : ''}
+    </div>
+    <div class="issue-card-bottom">
+      <div class="issue-meta">
+        <span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span>
+      </div>
+      <div class="issue-actions">
+        ${showRankChips ? rankChipSelector(issue.id, issue.top_rank) : ''}
+        ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>` : ''}
+        ${(isSolved && !isArchived) ? `<button class="icon-btn archive-team-issue-btn" data-id="${issue.id}" title="Archive">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        </button>` : ''}
+        ${isArchived ? `<button class="icon-btn unarchive-team-issue-btn" data-id="${issue.id}" title="Unarchive">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 10 14 12"/></svg>
+        </button>` : ''}
+        ${(!isArchived && !isSolved) ? `<button class="icon-btn delete-team-issue-btn" data-id="${issue.id}" title="Move to Solved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>` : ''}
+      </div>
+    </div>
+  `;
+
+  if (issue.owner_name) {
+    const chip = card.querySelector('.issue-owner-chip');
+    if (chip) {
+      chip.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2)';
+      chip.prepend(avatar(issue.owner_name, issue.owner_picture, issue.owner_color, 18));
+      chip.append(document.createTextNode(issue.owner_name));
+    }
+  }
+
+  return card;
+}
+
+function buildTeamIssueRow(issue) {
+  const isArchived = !!issue.archived;
+  const isSolved   = issue.status === 'solved';
+  const row = document.createElement('div');
+  row.className = `table-row team-issue-row ${isSolved ? 'solved' : ''} ${isArchived ? 'archived' : ''}`;
+  if (!isArchived) {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => openTeamIssueModal(issue.id));
+  }
+
+  const rankCell = issue.horizon === 'short_term' && !isArchived
+    ? rankChipSelector(issue.id, issue.top_rank)
+    : (issue.horizon === 'short_term' ? rankBadge(issue.top_rank) : '<span style="color:var(--text2)">—</span>');
+
+  row.innerHTML = `
+    <div>${rankCell}</div>
+    <div class="issue-row-title">${esc(issue.title)}</div>
+    <div class="issue-row-owner"></div>
+    <div><span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span></div>
+    <div class="row-actions">
+      ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-team-issue-btn" data-id="${issue.id}" title="Mark as Solved">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>` : ''}
+      ${(isSolved && !isArchived) ? `<button class="icon-btn archive-team-issue-btn" data-id="${issue.id}" title="Archive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      </button>` : ''}
+      ${isArchived ? `<button class="icon-btn unarchive-team-issue-btn" data-id="${issue.id}" title="Unarchive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 10 14 12"/></svg>
+      </button>` : ''}
+      ${(!isArchived && !isSolved) ? `<button class="icon-btn delete-team-issue-btn" data-id="${issue.id}" title="Move to Solved">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </button>` : ''}
+    </div>
+  `;
+
+  const ownerCell = row.querySelector('.issue-row-owner');
+  if (issue.owner_name) {
+    ownerCell.appendChild(avatar(issue.owner_name, issue.owner_picture, issue.owner_color, 22));
+    ownerCell.appendChild(document.createTextNode(issue.owner_name));
+  } else {
+    ownerCell.innerHTML = '<span style="color:var(--text2);font-size:13px">Unassigned</span>';
+  }
+
+  return row;
+}
+
+function renderTeamIssueOwnerFilter() {
+  const panel = qs('#team-issue-owner-filter-panel');
+  const selected = new Set(state.teamIssueOwnerFilter.map(Number));
+  panel.innerHTML =
+    state.users.map(u => `
+      <label class="owner-multiselect-option">
+        <input type="checkbox" data-user-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}/>
+        <span>${esc(u.name)}</span>
+      </label>
+    `).join('') +
+    `<div class="owner-multiselect-divider"></div>
+     <button type="button" class="owner-multiselect-clear" id="team-issue-owner-filter-clear">Clear selection</button>`;
+  updateTeamIssueOwnerFilterLabel();
+}
+
+function updateTeamIssueOwnerFilterLabel() {
+  const labelEl = qs('#team-issue-owner-filter-label');
+  const ids = state.teamIssueOwnerFilter.map(Number);
+  if (ids.length === 0) { labelEl.textContent = 'All Owners'; return; }
+  if (ids.length === 1) {
+    const u = state.users.find(x => x.id === ids[0]);
+    labelEl.textContent = u ? u.name : '1 owner';
+    return;
+  }
+  if (ids.length === 2) {
+    const names = ids.map(id => state.users.find(x => x.id === id)?.name).filter(Boolean);
+    labelEl.textContent = names.join(', ');
+    return;
+  }
+  labelEl.textContent = `${ids.length} owners`;
+}
+
+function renderTeamIssues() {
+  const grid = qs('#team-issues-list');
+  const tableEl = qs('#team-issues-table');
+  const tableBody = qs('#team-issues-table-body');
+  const empty = qs('#team-issues-empty');
+  const listMode = state.teamIssueViewMode === 'list';
+  const container = listMode ? tableBody : grid;
+  const buildFn   = listMode ? buildTeamIssueRow : buildTeamIssueCard;
+  grid.innerHTML = '';
+  tableBody.innerHTML = '';
+  grid.hidden = listMode;
+  tableEl.hidden = !listMode;
+
+  // Scope by horizon tab
+  const inScope = state.teamIssues.filter(t => t.horizon === state.teamIssueHorizonFilter);
+
+  // Owner filter (multi-select)
+  const ownerIds = state.teamIssueOwnerFilter.map(Number);
+  const ownerScoped = ownerIds.length
+    ? inScope.filter(t => ownerIds.includes(t.owner_id))
+    : inScope;
+
+  // Status filter
+  const statusFilter = state.teamIssueStatusFilter;
+  const filtered = statusFilter === 'solved'
+    ? ownerScoped.filter(t => t.status === 'solved')
+    : statusFilter
+      ? ownerScoped.filter(t => t.status === statusFilter && !t.archived)
+      : ownerScoped.filter(t => !t.archived);
+
+  // Stats (stable across owner/status; scoped only to horizon)
+  const activeScope = inScope.filter(t => !t.archived);
+  const inProg  = activeScope.filter(t => t.status === 'in_progress').length;
+  const waiting = activeScope.filter(t => t.status === 'waiting_for').length;
+  const block   = activeScope.filter(t => t.status === 'blocker').length;
+  const solved  = activeScope.filter(t => t.status === 'solved').length;
+  const total   = inProg + waiting + block;
+  qs('#team-issues-stats').innerHTML = `
+    <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
+    <div class="stat-card accent"><span class="stat-label">In Progress</span><span class="stat-value">${inProg}</span></div>
+    <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waiting}</span></div>
+    <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${block}</span></div>
+    <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
+  `;
+
+  if (filtered.length === 0) { empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  filtered.forEach(t => container.appendChild(buildFn(t)));
+
+  // Event wiring (scoped to current container)
+  container.querySelectorAll('.solve-team-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/team-issues/${btn.dataset.id}`, { status: 'solved' });
+      loadTeamIssues();
+    });
+  });
+  container.querySelectorAll('.archive-team-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/team-issues/${btn.dataset.id}`, { archived: true });
+      loadTeamIssues();
+    });
+  });
+  container.querySelectorAll('.unarchive-team-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/team-issues/${btn.dataset.id}`, { archived: false });
+      loadTeamIssues();
+    });
+  });
+  container.querySelectorAll('.delete-team-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/team-issues/${btn.dataset.id}`, { status: 'solved' });
+      loadTeamIssues();
+    });
+  });
+  container.querySelectorAll('.rank-chip').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const sel = btn.closest('.rank-chip-selector');
+      if (!sel) return;
+      const issueId = sel.dataset.issueId;
+      const wantRank = +btn.dataset.rank;
+      // Toggle: clicking an already-active rank clears it
+      const newRank = btn.classList.contains('active') ? null : wantRank;
+      await api.put(`/api/team-issues/${issueId}/rank`, { rank: newRank });
+      loadTeamIssues();
+    });
+  });
+}
+
+/* ── Modal ────────────────────────────────────────────────────────── */
+qs('#add-team-issue-btn').addEventListener('click', () => openTeamIssueModal(null));
+
+function openTeamIssueModal(editId) {
+  const issue = editId ? state.teamIssues.find(t => t.id === editId) : null;
+  qs('#team-issue-modal-title').textContent = issue ? 'Edit Issue' : 'Add Issue';
+  qs('#team-issue-id').value = issue ? issue.id : '';
+  qs('#team-issue-title').value = issue ? issue.title : '';
+  qs('#team-issue-description').value = issue ? (issue.description || '') : '';
+  qs('#team-issue-horizon').value = issue ? issue.horizon : state.teamIssueHorizonFilter;
+  qs('#team-issue-status').value = issue ? issue.status : 'in_progress';
+  qs('#team-issue-status-group').style.display = issue ? 'flex' : 'none';
+
+  const ownerSel = qs('#team-issue-owner');
+  ownerSel.innerHTML = '<option value="">Unassigned</option>' +
+    state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+  if (!issue) ownerSel.value = state.currentUser ? state.currentUser.id : '';
+
+  openModal('team-issue-modal');
+  qs('#team-issue-title').focus();
+}
+
+qs('#save-team-issue-btn').addEventListener('click', async () => {
+  const id = qs('#team-issue-id').value;
+  const body = {
+    title: qs('#team-issue-title').value.trim(),
+    description: qs('#team-issue-description').value.trim(),
+    owner_id: qs('#team-issue-owner').value || null,
+    horizon: qs('#team-issue-horizon').value,
+    status: qs('#team-issue-status').value,
+  };
+  if (!body.title) { qs('#team-issue-title').focus(); return; }
+  try {
+    if (id) {
+      await api.put(`/api/team-issues/${id}`, body);
+    } else {
+      // Don't send status on create — server defaults to in_progress
+      delete body.status;
+      await api.post('/api/team-issues', body);
+    }
+    closeModal('team-issue-modal');
+    loadTeamIssues();
+  } catch (e) { alert(e.message); }
+});
+
+/* ── Horizon tabs (Short Term / Long Term) ────────────────────────── */
+qsa('#team-issue-horizon-tabs .filter-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    qsa('#team-issue-horizon-tabs .filter-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.teamIssueHorizonFilter = tab.dataset.horizon;
+    renderTeamIssues();
+  });
+});
+
+/* ── Status tabs ──────────────────────────────────────────────────── */
+qsa('#team-issue-filter-tabs .filter-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    qsa('#team-issue-filter-tabs .filter-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.teamIssueStatusFilter = tab.dataset.status;
+    renderTeamIssues();
+  });
+});
+
+/* ── Owner multiselect ────────────────────────────────────────────── */
+qs('#team-issue-owner-filter-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const panel = qs('#team-issue-owner-filter-panel');
+  panel.hidden = !panel.hidden;
+});
+qs('#team-issue-owner-filter-panel').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (e.target.matches('input[type=checkbox][data-user-id]')) {
+    const id = +e.target.dataset.userId;
+    const idx = state.teamIssueOwnerFilter.indexOf(id);
+    if (e.target.checked && idx < 0) state.teamIssueOwnerFilter.push(id);
+    if (!e.target.checked && idx >= 0) state.teamIssueOwnerFilter.splice(idx, 1);
+    updateTeamIssueOwnerFilterLabel();
+    renderTeamIssues();
+  } else if (e.target.id === 'team-issue-owner-filter-clear') {
+    state.teamIssueOwnerFilter = [];
+    renderTeamIssueOwnerFilter();
+    renderTeamIssues();
+  }
+});
+document.addEventListener('click', (e) => {
+  const root = qs('#team-issue-owner-filter');
+  if (!root.contains(e.target)) qs('#team-issue-owner-filter-panel').hidden = true;
+});
+
+/* ── View-mode toggle (persisted) ─────────────────────────────────── */
+const TEAM_ISSUE_VIEW_MODE_KEY = 'ninety.teamIssueViewMode';
+{
+  const saved = localStorage.getItem(TEAM_ISSUE_VIEW_MODE_KEY);
+  if (saved === 'cards' || saved === 'list') {
+    state.teamIssueViewMode = saved;
+    qsa('#team-issue-view-toggle .view-mode-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === saved);
+    });
+  }
+}
+qsa('#team-issue-view-toggle .view-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    qsa('#team-issue-view-toggle .view-mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.teamIssueViewMode = btn.dataset.mode;
+    try { localStorage.setItem(TEAM_ISSUE_VIEW_MODE_KEY, btn.dataset.mode); } catch {}
+    renderTeamIssues();
+  });
 });
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1130,7 +1498,7 @@ function renderAgendaSections() {
   state.currentAgendaSections.forEach((sec, idx) => {
     const row = document.createElement('div');
     row.className = 'table-row agenda-section-row';
-    row.style.gridTemplateColumns = '32px 1fr 160px 80px 48px';
+    row.style.gridTemplateColumns = '32px 1fr 160px 80px 90px 48px';
     row.dataset.id = sec.id;
     row.innerHTML = `
       <div style="color:var(--text2);font-size:12px;text-align:center">${idx+1}</div>
@@ -1139,6 +1507,12 @@ function renderAgendaSections() {
       <div style="display:flex;align-items:center">
         <label class="toggle-switch">
           <input type="checkbox" class="section-visible-input" ${sec.visible ? 'checked' : ''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center">
+        <label class="toggle-switch" title="Display team issues during this section">
+          <input type="checkbox" class="section-shows-issues-input" ${sec.shows_issues ? 'checked' : ''} />
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -1152,16 +1526,18 @@ function renderAgendaSections() {
       const name = row.querySelector('.section-name-input').value.trim();
       const dur  = +row.querySelector('.section-dur-input').value || 5;
       const vis  = row.querySelector('.section-visible-input').checked;
+      const showsIssues = row.querySelector('.section-shows-issues-input').checked;
       if (!name) return;
-      await api.put(`/api/agenda-sections/${sec.id}`, { name, duration_minutes: dur, visible: vis });
+      await api.put(`/api/agenda-sections/${sec.id}`, { name, duration_minutes: dur, visible: vis, shows_issues: showsIssues });
       const s = state.currentAgendaSections.find(s => s.id === sec.id);
-      if (s) { s.name = name; s.duration_minutes = dur; s.visible = vis; }
+      if (s) { s.name = name; s.duration_minutes = dur; s.visible = vis; s.shows_issues = showsIssues; }
       const total2 = state.currentAgendaSections.reduce((s,x) => s + (x.duration_minutes||0), 0);
       qs('#agenda-total-time').textContent = `Total: ${total2 >= 60 ? Math.floor(total2/60)+'h '+total2%60+'m' : total2+' min'}`;
     };
     row.querySelector('.section-name-input').addEventListener('blur', save);
     row.querySelector('.section-dur-input').addEventListener('change', save);
     row.querySelector('.section-visible-input').addEventListener('change', save);
+    row.querySelector('.section-shows-issues-input').addEventListener('change', save);
     row.querySelector('.delete-section-btn').addEventListener('click', async () => {
       await api.del(`/api/agenda-sections/${sec.id}`);
       state.currentAgendaSections = state.currentAgendaSections.filter(s => s.id !== sec.id);
@@ -1292,6 +1668,73 @@ function updateRunnerDisplay() {
   // Play/pause icons
   qs('#runner-play-icon').classList.toggle('hidden', r.playing);
   qs('#runner-pause-icon').classList.toggle('hidden', !r.playing);
+
+  // Team-issues panel: only for sections flagged shows_issues
+  renderRunnerIssuesPanel(sec);
+}
+
+function renderRunnerIssuesPanel(sec) {
+  const panel = qs('#runner-issues-panel');
+  const list  = qs('#runner-issues-list');
+  if (!sec || !sec.shows_issues) { panel.hidden = true; return; }
+  panel.hidden = false;
+
+  // Short-term, non-archived, unsolved; sort by rank asc NULLS last, then created_at desc.
+  const items = (state.teamIssues || [])
+    .filter(t => t.horizon === 'short_term' && !t.archived && t.status !== 'solved')
+    .sort((a, b) => (a.top_rank ?? 99) - (b.top_rank ?? 99) || b.created_at.localeCompare(a.created_at));
+
+  if (items.length === 0) {
+    list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 2px">No short-term issues yet.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  items.forEach(t => {
+    const row = document.createElement('div');
+    row.className = `runner-issue-row ${t.status === 'solved' ? 'solved' : ''}`;
+    row.innerHTML = `
+      <div>${rankBadge(t.top_rank)}</div>
+      <div class="runner-issue-title">${esc(t.title)}</div>
+      <div class="runner-issue-owner"></div>
+      <div><span class="badge badge-${t.status}">${issueStatusLabel(t.status)}</span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${rankChipSelector(t.id, t.top_rank)}
+        <button class="icon-btn runner-solve-team-issue-btn" data-id="${t.id}" title="Mark as Solved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+      </div>
+    `;
+    const ownerCell = row.querySelector('.runner-issue-owner');
+    if (t.owner_name) {
+      ownerCell.appendChild(avatar(t.owner_name, t.owner_picture, t.owner_color, 22));
+    }
+    list.appendChild(row);
+  });
+
+  // Wire rank chips
+  list.querySelectorAll('.rank-chip').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const sel = btn.closest('.rank-chip-selector');
+      if (!sel) return;
+      const issueId = sel.dataset.issueId;
+      const wantRank = +btn.dataset.rank;
+      const newRank = btn.classList.contains('active') ? null : wantRank;
+      await api.put(`/api/team-issues/${issueId}/rank`, { rank: newRank });
+      await loadTeamIssues();
+      updateRunnerDisplay();
+    });
+  });
+  // Wire solve buttons
+  list.querySelectorAll('.runner-solve-team-issue-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api.put(`/api/team-issues/${btn.dataset.id}`, { status: 'solved' });
+      await loadTeamIssues();
+      updateRunnerDisplay();
+    });
+  });
 }
 
 qs('#runner-playpause-btn').addEventListener('click', () => {
@@ -1820,6 +2263,7 @@ async function loadAll() {
   await Promise.all([
     populateQuarterFilter().then(() => loadRocks()),
     loadIssues(),
+    loadTeamIssues(),
     loadMy90(),
   ]);
 }

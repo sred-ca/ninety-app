@@ -56,6 +56,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span>To-Dos</span>
         </button>
+        <button class="nav-item" data-view="team-issues">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="9" y1="10" x2="15" y2="10"/></svg>
+          <span>Issues</span>
+        </button>
         <button class="nav-item" data-view="meetings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span>Meetings</span>
@@ -190,6 +194,66 @@
         </div>
       </section>
 
+      <!-- ── Issues View ────────────────────────────────────── -->
+      <section id="view-team-issues" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Issues</h1>
+            <p class="view-subtitle">Identify, rank, and solve as a team</p>
+          </div>
+          <div class="view-header-right">
+            <div class="filter-tabs" id="team-issue-horizon-tabs">
+              <button class="filter-tab active" data-horizon="short_term">Short Term</button>
+              <button class="filter-tab" data-horizon="long_term">Long Term</button>
+            </div>
+            <div class="owner-multiselect" id="team-issue-owner-filter">
+              <button type="button" class="owner-multiselect-btn" id="team-issue-owner-filter-btn">
+                <span id="team-issue-owner-filter-label">All Owners</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="owner-multiselect-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="owner-multiselect-panel" id="team-issue-owner-filter-panel" hidden></div>
+            </div>
+            <div class="filter-tabs" id="team-issue-filter-tabs">
+              <button class="filter-tab" data-status="">All</button>
+              <button class="filter-tab active" data-status="in_progress">In Progress</button>
+              <button class="filter-tab" data-status="waiting_for">Waiting For</button>
+              <button class="filter-tab" data-status="blocker">Blocker</button>
+              <button class="filter-tab" data-status="solved">Solved</button>
+            </div>
+            <div class="view-mode-toggle" id="team-issue-view-toggle">
+              <button type="button" class="view-mode-btn active" data-mode="cards" title="Card view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button type="button" class="view-mode-btn" data-mode="list" title="List view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+              </button>
+            </div>
+            <button class="btn btn-primary" id="add-team-issue-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Issue
+            </button>
+          </div>
+        </div>
+
+        <div class="stats-bar" id="team-issues-stats"></div>
+
+        <div id="team-issues-list" class="issues-grid"></div>
+        <div id="team-issues-table" class="card" hidden>
+          <div class="table-header team-issue-table-header">
+            <span class="th">Rank</span>
+            <span class="th">Issue</span>
+            <span class="th">Owner</span>
+            <span class="th">Status</span>
+            <span class="th"></span>
+          </div>
+          <div id="team-issues-table-body" class="table-body"></div>
+        </div>
+        <div id="team-issues-empty" class="empty-state hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <p>No issues yet. Add one to get started.</p>
+        </div>
+      </section>
+
       <!-- ── Meetings View ──────────────────────────────────── -->
       <section id="view-meetings" class="view">
         <div class="view-header">
@@ -264,11 +328,12 @@
               <button class="btn btn-primary" id="save-agenda-btn">Save</button>
             </div>
             <div class="card agenda-sections-card">
-              <div class="table-header" style="grid-template-columns:32px 1fr 160px 80px 48px">
+              <div class="table-header" style="grid-template-columns:32px 1fr 160px 80px 90px 48px">
                 <span class="th"></span>
                 <span class="th">Section Name</span>
                 <span class="th">Duration (minutes)</span>
                 <span class="th">Visible</span>
+                <span class="th">Issues</span>
                 <span class="th"></span>
               </div>
               <div id="agenda-sections-list"></div>
@@ -454,6 +519,10 @@
             <div id="runner-progress-fill" class="runner-progress-fill"></div>
           </div>
         </div>
+        <div id="runner-issues-panel" class="runner-issues-panel" hidden>
+          <div class="runner-issues-header">Short-term issues</div>
+          <div id="runner-issues-list" class="runner-issues-list"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -612,6 +681,55 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-modal="issue-modal">Cancel</button>
         <button class="btn btn-primary" id="save-issue-btn">Save Issue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Team Issue Modal ──────────────────────────────────────── -->
+  <div id="team-issue-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="team-issue-modal-title">Add Issue</h3>
+        <button class="modal-close" data-modal="team-issue-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="team-issue-id" />
+        <div class="form-group">
+          <label>Issue Title *</label>
+          <input type="text" id="team-issue-title" placeholder="Name the issue clearly" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="team-issue-description" rows="3" placeholder="Context and details..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Owner</label>
+            <select id="team-issue-owner" class="select-input">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Horizon</label>
+            <select id="team-issue-horizon" class="select-input">
+              <option value="short_term" selected>Short Term</option>
+              <option value="long_term">Long Term</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" id="team-issue-status-group" style="display:none">
+          <label>Status</label>
+          <select id="team-issue-status" class="select-input">
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_for">Waiting For</option>
+            <option value="blocker">Blocker</option>
+            <option value="solved">Solved</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="team-issue-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-team-issue-btn">Save Issue</button>
       </div>
     </div>
   </div>

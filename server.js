@@ -1,7 +1,7 @@
 const express    = require('express');
 const path       = require('path');
 const crypto     = require('crypto');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries } = require('./database');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -189,6 +189,38 @@ app.post('/api/issues/:id/vote', wrap(async (req, res) => {
   const { user_id } = req.body;
   if (!user_id) return fail(res, 'user_id is required');
   ok(res, await issueQueries.vote(req.params.id, user_id));
+}));
+
+// ── Team Issues (IDS discussion items) ───────────────────────────────────────
+app.get('/api/team-issues', wrap(async (req, res) => {
+  const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
+  ok(res, await teamIssueQueries.getAll({
+    horizon: req.query.horizon || undefined,
+    status:  req.query.status  || undefined,
+    includeArchived,
+  }));
+}));
+app.get('/api/team-issues/:id', wrap(async (req, res) => ok(res, await teamIssueQueries.getById(req.params.id))));
+app.post('/api/team-issues', wrap(async (req, res) => {
+  const { title, description, horizon } = req.body;
+  if (!title) return fail(res, 'title is required');
+  const currentUserId = readAuthCookie(req)?.userId;
+  const owner_id = req.body.owner_id ?? currentUserId ?? null;
+  ok(res, await teamIssueQueries.create({ title, description, owner_id, horizon }));
+}));
+app.put('/api/team-issues/:id', wrap(async (req, res) => ok(res, await teamIssueQueries.update(req.params.id, req.body))));
+app.delete('/api/team-issues/:id', wrap(async (req, res) => {
+  await teamIssueQueries.delete(req.params.id);
+  ok(res, { deleted: true });
+}));
+app.put('/api/team-issues/:id/rank', wrap(async (req, res) => {
+  let { rank } = req.body;
+  if (rank === undefined) return fail(res, 'rank is required (1, 2, 3, or null)');
+  if (rank !== null) rank = Number(rank);
+  if (rank !== null && (!Number.isInteger(rank) || rank < 1 || rank > 3)) {
+    return fail(res, 'rank must be null or an integer 1-3');
+  }
+  ok(res, await teamIssueQueries.setRank(req.params.id, rank));
 }));
 
 // ── Agendas ──────────────────────────────────────────────────────────────────
