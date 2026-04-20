@@ -1768,10 +1768,12 @@ textarea { resize: vertical; min-height: 72px; }
 /* Content area */
 .runner-content-area {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 48px 64px;
   gap: 24px;
 }
