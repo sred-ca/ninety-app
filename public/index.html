@@ -264,6 +264,9 @@
           </div>
         </div>
 
+        <!-- Live-now banner (shown to attendees when a meeting is in_progress) -->
+        <div id="meetings-live-banner" class="meetings-live-banner" hidden></div>
+
         <!-- Upcoming panel -->
         <div id="meetings-panel-upcoming" class="meetings-panel">
           <div id="meetings-upcoming-list"></div>
@@ -318,12 +321,13 @@
               <button class="btn btn-primary" id="save-agenda-btn">Save</button>
             </div>
             <div class="card agenda-sections-card">
-              <div class="table-header" style="grid-template-columns:32px 1fr 160px 80px 90px 48px">
+              <div class="table-header" style="grid-template-columns:32px 1fr 160px 80px 90px 90px 48px">
                 <span class="th"></span>
                 <span class="th">Section Name</span>
                 <span class="th">Duration (minutes)</span>
                 <span class="th">Visible</span>
                 <span class="th">Issues</span>
+                <span class="th">To-Dos</span>
                 <span class="th"></span>
               </div>
               <div id="agenda-sections-list"></div>
@@ -513,6 +517,10 @@
           <div class="runner-issues-header">Short-term issues</div>
           <div id="runner-issues-list" class="runner-issues-list"></div>
         </div>
+        <div id="runner-todos-panel" class="runner-issues-panel" hidden>
+          <div class="runner-issues-header">Attendee to-dos</div>
+          <div id="runner-todos-list" class="runner-issues-list"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -528,6 +536,10 @@
         <div class="form-group">
           <label>Choose Agenda</label>
           <select id="pick-agenda-select" class="select-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Attendees</label>
+          <div class="attendee-picker" id="pick-attendees"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -553,10 +565,35 @@
           <label>Date &amp; Time</label>
           <input type="datetime-local" id="schedule-datetime" class="select-input" />
         </div>
+        <div class="form-group">
+          <label>Attendees</label>
+          <div class="attendee-picker" id="schedule-attendees"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" data-modal="schedule-meeting-modal">Cancel</button>
         <button class="btn btn-primary" id="confirm-schedule-btn">Schedule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Edit Attendees Modal ─────────────────────────────────────── -->
+  <div id="edit-attendees-modal" class="modal-overlay">
+    <div class="modal-box modal-sm">
+      <div class="modal-header">
+        <h3>Edit Attendees</h3>
+        <button class="modal-close" data-modal="edit-attendees-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-attendees-meeting-id" />
+        <div class="form-group">
+          <label>Attendees</label>
+          <div class="attendee-picker" id="edit-attendees-picker"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="edit-attendees-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-attendees-btn">Save</button>
       </div>
     </div>
   </div>

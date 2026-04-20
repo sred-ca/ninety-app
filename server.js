@@ -246,11 +246,22 @@ app.delete('/api/agenda-sections/:id', wrap(async (req, res) => {
 // ── Meetings ─────────────────────────────────────────────────────────────────
 app.get('/api/meetings', wrap(async (req, res) => ok(res, await meetingQueries.getAll(req.query.status))));
 app.post('/api/meetings', wrap(async (req, res) => {
-  const { agenda_id, title, scheduled_at, sections_snapshot } = req.body;
+  const { agenda_id, title, scheduled_at, sections_snapshot, attendee_ids } = req.body;
   if (!title) return fail(res, 'title is required');
-  ok(res, await meetingQueries.create({ agenda_id, title, scheduled_at, sections_snapshot }));
+  ok(res, await meetingQueries.create({ agenda_id, title, scheduled_at, sections_snapshot, attendee_ids }));
 }));
 app.put('/api/meetings/:id', wrap(async (req, res) => ok(res, await meetingQueries.update(req.params.id, req.body))));
+// Replace the attendee list. Frozen once the meeting goes in_progress (or later).
+app.put('/api/meetings/:id/attendees', wrap(async (req, res) => {
+  const meeting = await meetingQueries.getById(req.params.id);
+  if (!meeting) return fail(res, 'meeting not found', 404);
+  if (meeting.status !== 'upcoming') {
+    return fail(res, 'Attendees can only be edited on upcoming meetings.');
+  }
+  const { userIds } = req.body;
+  if (!Array.isArray(userIds)) return fail(res, 'userIds must be an array');
+  ok(res, await meetingQueries.setAttendees(req.params.id, userIds));
+}));
 app.delete('/api/meetings/:id', wrap(async (req, res) => {
   await meetingQueries.delete(req.params.id); ok(res, { deleted: true });
 }));

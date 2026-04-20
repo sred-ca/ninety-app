@@ -923,6 +923,69 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .team-issue-row.archived { opacity: 0.6; }
 
+/* ── Attendee picker (shared by modals) ───────────────────────────── */
+.attendee-picker {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  padding: 4px;
+}
+.attendee-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+}
+.attendee-option:hover { background: var(--surface3); }
+.attendee-option input { margin: 0; cursor: pointer; flex-shrink: 0; }
+.attendee-option .avatar { width: 22px; height: 22px; font-size: 10px; }
+
+/* Attendee avatar strip (inline on meeting cards) */
+.attendee-strip { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.attendee-strip .avatar { width: 22px; height: 22px; font-size: 10px; }
+.attendee-strip-empty { color: var(--text2); font-size: 12px; font-style: italic; }
+
+/* ── Live-now banner (Meetings tab) ───────────────────────────────── */
+.meetings-live-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.meetings-live-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, var(--accent-bg), rgba(99,102,241,0.05));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.meetings-live-pulse {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 0 var(--red);
+  animation: liveNowPulse 2s infinite;
+  flex-shrink: 0;
+}
+@keyframes liveNowPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+  70%  { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+.meetings-live-text { flex: 1; min-width: 0; }
+.meetings-live-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--red); font-weight: 700;
+}
+.meetings-live-title { font-size: 15px; font-weight: 600; color: var(--text); margin-top: 2px; }
+
 /* ── Meeting runner: issues panel ─────────────────────────────────── */
 .runner-issues-panel {
   margin-top: 24px;

@@ -91,6 +91,12 @@ if (USE_PG) {
         created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS meeting_attendees (
+        meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        PRIMARY KEY (meeting_id, user_id)
+      );
+
       CREATE TABLE IF NOT EXISTS team_issues (
         id          SERIAL PRIMARY KEY,
         title       TEXT NOT NULL,
@@ -113,6 +119,7 @@ if (USE_PG) {
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_issues BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_todos  BOOLEAN NOT NULL DEFAULT FALSE;
     `);
     // Rename legacy statuses to new names and fix column default
     await pool.query(`
@@ -256,12 +263,12 @@ if (USE_PG) {
     create: async ({ title }) => (await pool.query('INSERT INTO agendas (title) VALUES ($1) RETURNING *', [title])).rows[0],
     update: async (id, { title }) => (await pool.query('UPDATE agendas SET title=$1 WHERE id=$2 RETURNING *', [title, id])).rows[0] ?? null,
     delete: async (id) => pool.query('DELETE FROM agendas WHERE id=$1', [id]),
-    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues }) => (await pool.query(
-      'INSERT INTO agenda_sections (agenda_id,name,duration_minutes,visible,sort_order,shows_issues) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [agendaId, name, duration_minutes ?? 5, visible !== false, sort_order ?? 0, !!shows_issues]
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues, shows_todos }) => (await pool.query(
+      'INSERT INTO agenda_sections (agenda_id,name,duration_minutes,visible,sort_order,shows_issues,shows_todos) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [agendaId, name, duration_minutes ?? 5, visible !== false, sort_order ?? 0, !!shows_issues, !!shows_todos]
     )).rows[0],
     updateSection: async (id, fields) => {
-      const allowed = ['name','duration_minutes','visible','sort_order','shows_issues'];
+      const allowed = ['name','duration_minutes','visible','sort_order','shows_issues','shows_todos'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return null;
       const sets = keys.map((k,i) => `${k}=$${i+1}`).join(', ');
@@ -271,18 +278,49 @@ if (USE_PG) {
     deleteSection: async (id) => pool.query('DELETE FROM agenda_sections WHERE id=$1', [id]),
   };
 
+  async function attachAttendees(meetings) {
+    if (!meetings || meetings.length === 0) return meetings;
+    const ids = meetings.map(m => m.id);
+    const { rows } = await pool.query(
+      `SELECT ma.meeting_id, u.id, u.name, u.color, u.picture
+       FROM meeting_attendees ma JOIN users u ON u.id = ma.user_id
+       WHERE ma.meeting_id = ANY($1::int[])
+       ORDER BY u.name ASC`,
+      [ids]
+    );
+    const byMeeting = {};
+    rows.forEach(r => {
+      if (!byMeeting[r.meeting_id]) byMeeting[r.meeting_id] = [];
+      byMeeting[r.meeting_id].push({ id: r.id, name: r.name, color: r.color, picture: r.picture });
+    });
+    meetings.forEach(m => { m.attendees = byMeeting[m.id] || []; });
+    return meetings;
+  }
+
   const meetingQueries = {
     getAll: async (status) => {
       const q = status
         ? await pool.query('SELECT * FROM meetings WHERE status=$1 ORDER BY COALESCE(scheduled_at,created_at) DESC', [status])
         : await pool.query('SELECT * FROM meetings ORDER BY COALESCE(scheduled_at,created_at) DESC');
-      return q.rows;
+      return attachAttendees(q.rows);
     },
-    getById: async (id) => (await pool.query('SELECT * FROM meetings WHERE id=$1', [id])).rows[0] ?? null,
-    create: async ({ agenda_id, title, scheduled_at, sections_snapshot }) => (await pool.query(
-      'INSERT INTO meetings (agenda_id,title,scheduled_at,sections_snapshot) VALUES ($1,$2,$3,$4) RETURNING *',
-      [agenda_id || null, title, scheduled_at || null, sections_snapshot ? JSON.stringify(sections_snapshot) : null]
-    )).rows[0],
+    getById: async (id) => {
+      const row = (await pool.query('SELECT * FROM meetings WHERE id=$1', [id])).rows[0] ?? null;
+      if (!row) return null;
+      await attachAttendees([row]);
+      return row;
+    },
+    create: async ({ agenda_id, title, scheduled_at, sections_snapshot, attendee_ids }) => {
+      const { rows } = await pool.query(
+        'INSERT INTO meetings (agenda_id,title,scheduled_at,sections_snapshot) VALUES ($1,$2,$3,$4) RETURNING *',
+        [agenda_id || null, title, scheduled_at || null, sections_snapshot ? JSON.stringify(sections_snapshot) : null]
+      );
+      const meeting = rows[0];
+      if (Array.isArray(attendee_ids) && attendee_ids.length) {
+        await meetingQueries.setAttendees(meeting.id, attendee_ids);
+      }
+      return meetingQueries.getById(meeting.id);
+    },
     update: async (id, fields) => {
       const allowed = ['title','scheduled_at','started_at','ended_at','status','sections_snapshot'];
       const keys = allowed.filter(k => k in fields);
@@ -293,6 +331,25 @@ if (USE_PG) {
       return meetingQueries.getById(id);
     },
     delete: async (id) => pool.query('DELETE FROM meetings WHERE id=$1', [id]),
+    // Replace the attendee list. Caller enforces whether this is allowed (e.g. only while upcoming).
+    setAttendees: async (meetingId, userIds) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM meeting_attendees WHERE meeting_id=$1', [meetingId]);
+        const unique = Array.from(new Set((userIds || []).map(Number).filter(Boolean)));
+        for (const uid of unique) {
+          await client.query('INSERT INTO meeting_attendees (meeting_id,user_id) VALUES ($1,$2)', [meetingId, uid]);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      return meetingQueries.getById(meetingId);
+    },
   };
 
   const TEAM_ISSUE_Q = `
@@ -544,34 +601,71 @@ if (USE_PG) {
       db.agenda_sections = db.agenda_sections.filter(s => s.agenda_id !== +id);
       persist(db);
     },
-    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues }) => {
-      const s = { id: nextId('agenda_sections'), agenda_id: +agendaId, name, duration_minutes: duration_minutes ?? 5, visible: visible !== false, sort_order: sort_order ?? 0, shows_issues: !!shows_issues };
+    addSection: async (agendaId, { name, duration_minutes, visible, sort_order, shows_issues, shows_todos }) => {
+      const s = { id: nextId('agenda_sections'), agenda_id: +agendaId, name, duration_minutes: duration_minutes ?? 5, visible: visible !== false, sort_order: sort_order ?? 0, shows_issues: !!shows_issues, shows_todos: !!shows_todos };
       db.agenda_sections.push(s); persist(db); return s;
     },
     updateSection: async (id, fields) => {
       const s = db.agenda_sections.find(s => s.id === +id); if (!s) return null;
-      ['name','duration_minutes','visible','sort_order','shows_issues'].forEach(k => { if (k in fields) s[k] = fields[k]; });
+      ['name','duration_minutes','visible','sort_order','shows_issues','shows_todos'].forEach(k => { if (k in fields) s[k] = fields[k]; });
       persist(db); return s;
     },
     deleteSection: async (id) => { db.agenda_sections = db.agenda_sections.filter(s => s.id !== +id); persist(db); },
   };
 
+  if (!db.meeting_attendees) { db.meeting_attendees = []; }
+
+  function enrichMeeting(m) {
+    const attendees = db.meeting_attendees
+      .filter(ma => ma.meeting_id === m.id)
+      .map(ma => {
+        const u = db.users.find(u => u.id === ma.user_id);
+        return u ? { id: u.id, name: u.name, color: u.color, picture: u.picture ?? null } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { ...m, attendees };
+  }
+
   const meetingQueries = {
     getAll: async (status) => {
       const list = status ? db.meetings.filter(m => m.status === status) : [...db.meetings];
-      return list.sort((a,b) => (b.scheduled_at||b.created_at).localeCompare(a.scheduled_at||a.created_at));
+      return list
+        .sort((a,b) => (b.scheduled_at||b.created_at).localeCompare(a.scheduled_at||a.created_at))
+        .map(enrichMeeting);
     },
-    getById: async (id) => db.meetings.find(m => m.id === +id) ?? null,
-    create: async ({ agenda_id, title, scheduled_at, sections_snapshot }) => {
+    getById: async (id) => {
+      const m = db.meetings.find(m => m.id === +id);
+      return m ? enrichMeeting(m) : null;
+    },
+    create: async ({ agenda_id, title, scheduled_at, sections_snapshot, attendee_ids }) => {
       const m = { id: nextId('meetings'), agenda_id: agenda_id || null, title, scheduled_at: scheduled_at || null, started_at: null, ended_at: null, status: 'upcoming', sections_snapshot: sections_snapshot || null, created_at: nowStr() };
-      db.meetings.push(m); persist(db); return m;
+      db.meetings.push(m);
+      if (Array.isArray(attendee_ids)) {
+        const unique = Array.from(new Set(attendee_ids.map(Number).filter(Boolean)));
+        unique.forEach(uid => db.meeting_attendees.push({ meeting_id: m.id, user_id: uid }));
+      }
+      persist(db);
+      return enrichMeeting(m);
     },
     update: async (id, fields) => {
       const m = db.meetings.find(m => m.id === +id); if (!m) return null;
       ['title','scheduled_at','started_at','ended_at','status','sections_snapshot'].forEach(k => { if (k in fields) m[k] = fields[k]; });
-      persist(db); return m;
+      persist(db); return enrichMeeting(m);
     },
-    delete: async (id) => { db.meetings = db.meetings.filter(m => m.id !== +id); persist(db); },
+    delete: async (id) => {
+      db.meetings = db.meetings.filter(m => m.id !== +id);
+      db.meeting_attendees = db.meeting_attendees.filter(ma => ma.meeting_id !== +id);
+      persist(db);
+    },
+    setAttendees: async (meetingId, userIds) => {
+      const mid = +meetingId;
+      db.meeting_attendees = db.meeting_attendees.filter(ma => ma.meeting_id !== mid);
+      const unique = Array.from(new Set((userIds || []).map(Number).filter(Boolean)));
+      unique.forEach(uid => db.meeting_attendees.push({ meeting_id: mid, user_id: uid }));
+      persist(db);
+      return meetingQueries.getById(mid);
+    },
   };
 
   const teamIssueQueries = {
