@@ -136,6 +136,7 @@ body {
 .main {
   flex: 1;
   min-height: 0;       /* allow flex child to shrink so overflow-y scrolls */
+  height: 100%;        /* belt-and-suspenders: bound the height explicitly */
   overflow-y: auto;
   padding: 0;
 }
