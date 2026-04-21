@@ -189,6 +189,15 @@ function closeModal(id) { qs(`#${id}`).classList.remove('active'); }
 /* ── Auth / User ─────────────────────────────────────────────────── */
 async function loadUsers() {
   state.users = await api.get('/api/users');
+  // Drop any persisted owner-filter IDs that no longer map to a real user.
+  if (state.issueOwnerFilter.length) {
+    const alive = new Set(state.users.map(u => u.id));
+    const pruned = state.issueOwnerFilter.filter(id => alive.has(+id));
+    if (pruned.length !== state.issueOwnerFilter.length) {
+      state.issueOwnerFilter = pruned;
+      if (typeof saveIssueOwnerFilter === 'function') saveIssueOwnerFilter();
+    }
+  }
   renderIssueOwnerFilter();
   renderTeamIssueOwnerFilter();
 }
@@ -1700,6 +1709,11 @@ async function startRunner(agendaId, title, existingMeetingId, attendeeIds) {
   }, 1000);
 }
 
+function resetRunnerScroll() {
+  const el = document.querySelector('.runner-content-area');
+  if (el) el.scrollTop = 0;
+}
+
 function renderRunnerSidebar() {
   const r = state.runner;
   const el = qs('#runner-agenda-items');
@@ -1716,6 +1730,7 @@ function renderRunnerSidebar() {
       r.sectionElapsed = 0;
       renderRunnerSidebar();
       updateRunnerDisplay();
+      resetRunnerScroll();
     });
     el.appendChild(item);
   });
@@ -1963,12 +1978,12 @@ qs('#runner-playpause-btn').addEventListener('click', () => {
 
 qs('#runner-prev-btn').addEventListener('click', () => {
   const r = state.runner;
-  if (r.sectionIdx > 0) { r.sectionIdx--; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); }
+  if (r.sectionIdx > 0) { r.sectionIdx--; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); resetRunnerScroll(); }
 });
 
 qs('#runner-next-btn').addEventListener('click', () => {
   const r = state.runner;
-  if (r.sectionIdx < r.sections.length - 1) { r.sectionIdx++; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); }
+  if (r.sectionIdx < r.sections.length - 1) { r.sectionIdx++; r.sectionElapsed = 0; renderRunnerSidebar(); updateRunnerDisplay(); resetRunnerScroll(); }
 });
 
 qs('#runner-finish-btn').addEventListener('click', async () => {
@@ -2483,6 +2498,7 @@ async function loadAll() {
     populateQuarterFilter().then(() => loadRocks()),
     loadIssues(),
     loadTeamIssues(),
+    loadMeetings(),
     loadMy90(),
   ]);
 }

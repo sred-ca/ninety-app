@@ -44,6 +44,25 @@ const wrap = (fn) => async (req, res) => {
   catch (e) { console.error(e); fail(res, e.message, 500); }
 };
 
+// Require a signed auth cookie on any /api/* route that mutates data or reads
+// something private. /api/me and the OAuth callbacks opt out.
+function requireAuth(req, res, next) {
+  const auth = readAuthCookie(req);
+  if (!auth || !auth.userId) return fail(res, 'not authenticated', 401);
+  req.userId = auth.userId;
+  next();
+}
+
+// Tiny value whitelist helper used by route handlers to reject unknown enum
+// values before they reach the query layer.
+function allow(value, allowed) {
+  return value === undefined || value === null || allowed.includes(value);
+}
+const STATUS_ISSUE   = ['in_progress', 'waiting_for', 'blocker', 'solved'];
+const STATUS_ROCK    = ['not_started', 'on_track', 'off_track', 'done'];
+const PRIORITY_VALS  = ['low', 'medium', 'high'];
+const HORIZON_VALS   = ['short_term', 'long_term'];
+
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -136,6 +155,10 @@ app.get('/auth/logout', (req, res) => {
   res.redirect('/');
 });
 
+// Everything below this line requires a signed auth cookie. /api/me above
+// opts out because it legitimately needs to return null for logged-out users.
+app.use('/api', requireAuth);
+
 // ── Users ────────────────────────────────────────────────────────────────────
 app.get('/api/users', wrap(async (req, res) => ok(res, await userQueries.getAll())));
 app.post('/api/users', wrap(async (req, res) => {
@@ -160,9 +183,13 @@ app.post('/api/rocks', wrap(async (req, res) => {
   const { title, description, owner_id, quarter, status, progress } = req.body;
   if (!title)   return fail(res, 'title is required');
   if (!quarter) return fail(res, 'quarter is required');
+  if (!allow(status, STATUS_ROCK)) return fail(res, `status must be one of ${STATUS_ROCK.join(', ')}`);
   ok(res, await rockQueries.create({ title, description, owner_id, quarter, status, progress }));
 }));
-app.put('/api/rocks/:id', wrap(async (req, res) => ok(res, await rockQueries.update(req.params.id, req.body))));
+app.put('/api/rocks/:id', wrap(async (req, res) => {
+  if (!allow(req.body.status, STATUS_ROCK)) return fail(res, `status must be one of ${STATUS_ROCK.join(', ')}`);
+  ok(res, await rockQueries.update(req.params.id, req.body));
+}));
 app.delete('/api/rocks/:id', wrap(async (req, res) => {
   await rockQueries.delete(req.params.id);
   ok(res, { deleted: true });
@@ -171,24 +198,27 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
 // ── Issues ───────────────────────────────────────────────────────────────────
 app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
 app.get('/api/issues', wrap(async (req, res) => {
-  const currentUserId = readAuthCookie(req)?.userId;
   const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
-  ok(res, await issueQueries.getAll(req.query.status, currentUserId, includeArchived));
+  ok(res, await issueQueries.getAll(req.query.status, req.userId, includeArchived));
 }));
 app.post('/api/issues', wrap(async (req, res) => {
   const { title, description, owner_id, priority, due_date, private: isPrivate } = req.body;
   if (!title) return fail(res, 'title is required');
+  if (!allow(priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
   ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate }));
 }));
-app.put('/api/issues/:id', wrap(async (req, res) => ok(res, await issueQueries.update(req.params.id, req.body))));
+app.put('/api/issues/:id', wrap(async (req, res) => {
+  if (!allow(req.body.status, STATUS_ISSUE)) return fail(res, `status must be one of ${STATUS_ISSUE.join(', ')}`);
+  if (!allow(req.body.priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
+  ok(res, await issueQueries.update(req.params.id, req.body));
+}));
 app.delete('/api/issues/:id', wrap(async (req, res) => {
   await issueQueries.delete(req.params.id);
   ok(res, { deleted: true });
 }));
+// Vote always records the signed-in user (H3); ignore any body-supplied user_id.
 app.post('/api/issues/:id/vote', wrap(async (req, res) => {
-  const { user_id } = req.body;
-  if (!user_id) return fail(res, 'user_id is required');
-  ok(res, await issueQueries.vote(req.params.id, user_id));
+  ok(res, await issueQueries.vote(req.params.id, req.userId));
 }));
 
 // ── Team Issues (IDS discussion items) ───────────────────────────────────────
@@ -204,11 +234,15 @@ app.get('/api/team-issues/:id', wrap(async (req, res) => ok(res, await teamIssue
 app.post('/api/team-issues', wrap(async (req, res) => {
   const { title, description, horizon } = req.body;
   if (!title) return fail(res, 'title is required');
-  const currentUserId = readAuthCookie(req)?.userId;
-  const owner_id = req.body.owner_id ?? currentUserId ?? null;
+  if (!allow(horizon, HORIZON_VALS)) return fail(res, `horizon must be one of ${HORIZON_VALS.join(', ')}`);
+  const owner_id = req.body.owner_id ?? req.userId ?? null;
   ok(res, await teamIssueQueries.create({ title, description, owner_id, horizon }));
 }));
-app.put('/api/team-issues/:id', wrap(async (req, res) => ok(res, await teamIssueQueries.update(req.params.id, req.body))));
+app.put('/api/team-issues/:id', wrap(async (req, res) => {
+  if (!allow(req.body.status, STATUS_ISSUE)) return fail(res, `status must be one of ${STATUS_ISSUE.join(', ')}`);
+  if (!allow(req.body.horizon, HORIZON_VALS)) return fail(res, `horizon must be one of ${HORIZON_VALS.join(', ')}`);
+  ok(res, await teamIssueQueries.update(req.params.id, req.body));
+}));
 app.delete('/api/team-issues/:id', wrap(async (req, res) => {
   await teamIssueQueries.delete(req.params.id);
   ok(res, { deleted: true });
