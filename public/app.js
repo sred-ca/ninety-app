@@ -2106,7 +2106,7 @@ function renderMy90() {
 
   // ── Box 2: My To-Dos (split into Public / Private columns) ────────
   const todosBox = document.createElement('div');
-  todosBox.className = 'card my90-box';
+  todosBox.className = 'card my90-box my90-box--wide';
 
   const publicTodos  = state.my90Issues.filter(i => !i.private);
   const privateTodos = state.my90Issues.filter(i =>  i.private);
@@ -2178,7 +2178,7 @@ function renderMy90() {
 
   // ── Box 3: Upcoming Meetings ──────────────────────────────────────
   const meetingsBox = document.createElement('div');
-  meetingsBox.className = 'card my90-box';
+  meetingsBox.className = 'card my90-box my90-box--full';
 
   meetingsBox.innerHTML = `
     <div class="my90-box-header">

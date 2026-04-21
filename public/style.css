@@ -2063,6 +2063,14 @@ textarea { resize: vertical; min-height: 72px; }
   gap: 20px;
   align-items: start;
 }
+/* Give the to-dos box more horizontal room so Public/Private columns have
+   enough width for titles. Row 1: Rocks | To-Dos (wide). Row 2: Meetings full width. */
+.my90-box--wide { grid-column: span 2; }
+.my90-box--full { grid-column: 1 / -1; }
+@media (max-width: 960px) {
+  .my90-grid { grid-template-columns: 1fr; }
+  .my90-box--wide, .my90-box--full { grid-column: auto; }
+}
 
 .my90-box {
   display: flex;
