@@ -2133,6 +2133,52 @@ textarea { resize: vertical; min-height: 72px; }
   overflow: hidden;
 }
 
+/* Two-column layout for My 90 to-dos (public vs private) */
+.my90-todos-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+}
+.my90-todos-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.my90-todos-col--private {
+  border-left: 1px solid var(--border);
+}
+.my90-todos-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text2);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+.my90-todos-col-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  background: var(--surface3);
+  padding: 1px 7px;
+  border-radius: 99px;
+  min-width: 20px;
+  text-align: center;
+}
+.my90-todos-col-body {
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 720px) {
+  .my90-todos-columns { grid-template-columns: 1fr; }
+  .my90-todos-col--private { border-left: none; border-top: 1px solid var(--border); }
+}
+
 .my90-row {
   display: flex;
   align-items: center;

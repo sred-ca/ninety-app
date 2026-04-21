@@ -2104,9 +2104,12 @@ function renderMy90() {
   rocksBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('rocks'));
   grid.appendChild(rocksBox);
 
-  // ── Box 2: My To-Dos ──────────────────────────────────────────────
+  // ── Box 2: My To-Dos (split into Public / Private columns) ────────
   const todosBox = document.createElement('div');
   todosBox.className = 'card my90-box';
+
+  const publicTodos  = state.my90Issues.filter(i => !i.private);
+  const privateTodos = state.my90Issues.filter(i =>  i.private);
 
   const blockerCount  = state.my90Issues.filter(i => i.status === 'blocker').length;
   const overdueCount  = state.my90Issues.filter(i => {
@@ -2125,14 +2128,30 @@ function renderMy90() {
       <span class="my90-box-count">${state.my90Issues.length}</span>
       <button class="btn btn-ghost my90-view-all" data-goto="issues">View All</button>
     </div>
-    <div class="my90-box-body" id="my90-todos-body"></div>
+    <div class="my90-todos-columns">
+      <div class="my90-todos-col">
+        <div class="my90-todos-col-header">
+          <span>Public To-Dos</span>
+          <span class="my90-todos-col-count">${publicTodos.length}</span>
+        </div>
+        <div class="my90-todos-col-body" data-visibility="public"></div>
+      </div>
+      <div class="my90-todos-col my90-todos-col--private">
+        <div class="my90-todos-col-header">
+          <span>Private To-Dos</span>
+          <span class="my90-todos-col-count">${privateTodos.length}</span>
+        </div>
+        <div class="my90-todos-col-body" data-visibility="private"></div>
+      </div>
+    </div>
   `;
 
-  const todosBody = todosBox.querySelector('#my90-todos-body');
-  if (state.my90Issues.length === 0) {
-    todosBody.innerHTML = `<div class="my90-empty">No open to-dos assigned to you.</div>`;
-  } else {
-    state.my90Issues.forEach(issue => {
+  const fillColumn = (bodyEl, items) => {
+    if (items.length === 0) {
+      bodyEl.innerHTML = `<div class="my90-empty">None</div>`;
+      return;
+    }
+    items.forEach(issue => {
       const due = formatDueDate(issue.due_date);
       const row = document.createElement('div');
       row.className = 'my90-row';
@@ -2147,9 +2166,12 @@ function renderMy90() {
       const badgeEl = badge(issueStatusLabel(issue.status), issue.status);
       badgeEl.classList.add('my90-badge');
       row.appendChild(badgeEl);
-      todosBody.appendChild(row);
+      bodyEl.appendChild(row);
     });
-  }
+  };
+
+  fillColumn(todosBox.querySelector('[data-visibility="public"]'),  publicTodos);
+  fillColumn(todosBox.querySelector('[data-visibility="private"]'), privateTodos);
 
   todosBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('issues'));
   grid.appendChild(todosBox);
