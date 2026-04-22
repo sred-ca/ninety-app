@@ -170,7 +170,9 @@ function requireCoachingFlag(req, res, next) {
 function requireApiKey(req, res, next) {
   if (!NINETY_API_KEY) return fail(res, 'Coaching API key not configured', 500);
   const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
-  if (token !== NINETY_API_KEY) return fail(res, 'Unauthorized', 401);
+  const a = Buffer.from(token);
+  const b = Buffer.from(NINETY_API_KEY);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
   next();
 }
 async function resolveCoachingUser(res) {

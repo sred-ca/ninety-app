@@ -512,7 +512,7 @@ if (USE_PG) {
 
       const rocks = await pool.query(
         `SELECT id, title, status, progress FROM rocks
-         WHERE owner_id=$1 AND status <> 'complete'
+         WHERE owner_id=$1 AND status <> 'done'
          ORDER BY created_at DESC`,
         [user_id]
       );
@@ -1128,7 +1128,7 @@ if (USE_PG) {
       }
 
       const active_rocks = db.rocks
-        .filter(r => r.owner_id === uid && r.status !== 'complete')
+        .filter(r => r.owner_id === uid && r.status !== 'done')
         .map(r => ({ id: r.id, title: r.title, status: r.status, progress: r.progress }));
 
       return { yesterday_commitments, streak_days: streak, active_rocks };
