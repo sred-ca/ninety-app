@@ -192,6 +192,20 @@ app.get('/api/coaching/context', requireCoachingFlag, requireApiKey, wrap(async 
   ok(res, await coachingQueries.getContext(user.id));
 }));
 
+// ── Cron jobs (Vercel Cron; authed via Bearer CRON_SECRET) ───────────────────
+// Registered before the /api cookie gate so Vercel's cron invocation can
+// reach it without a session.
+function requireCronSecret(req, res, next) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return fail(res, 'CRON_SECRET not configured', 500);
+  const got = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  if (got !== secret) return fail(res, 'Unauthorized', 401);
+  next();
+}
+app.get('/api/cron/promote-milestones', requireCronSecret, wrap(async (req, res) => {
+  ok(res, await milestoneQueries.promoteDue());
+}));
+
 // Everything below this line requires a signed auth cookie. /api/me above
 // opts out because it legitimately needs to return null for logged-out users.
 app.use('/api', requireAuth);

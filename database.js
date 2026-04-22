@@ -152,6 +152,9 @@ if (USE_PG) {
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_issues BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_todos  BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE rock_milestones ADD COLUMN IF NOT EXISTS promoted_to_todo_at TIMESTAMPTZ;
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_milestone_id INTEGER REFERENCES rock_milestones(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_issues_source_milestone ON issues(source_milestone_id);
     `);
     // Rename legacy statuses to new names and fix column default
     await pool.query(`
@@ -573,6 +576,47 @@ if (USE_PG) {
       const m = await milestoneQueries.getById(id);
       await pool.query('DELETE FROM rock_milestones WHERE id=$1', [id]);
       if (m) await syncRockProgressFromMilestones(m.rock_id);
+    },
+    // Promote each milestone due within 7 days to a to-do, exactly once.
+    // Already-promoted milestones (promoted_to_todo_at IS NOT NULL) are skipped,
+    // so deleting the generated to-do won't resurrect it.
+    promoteDue: async () => {
+      const client = await pool.connect();
+      let promoted = 0; let checked = 0;
+      try {
+        await client.query('BEGIN');
+        const { rows: due } = await client.query(
+          `SELECT m.*, r.title AS rock_title, r.owner_id AS rock_owner_id
+           FROM rock_milestones m
+           JOIN rocks r ON r.id = m.rock_id
+           WHERE m.done = FALSE
+             AND m.promoted_to_todo_at IS NULL
+             AND m.due_date IS NOT NULL
+             AND m.due_date <= CURRENT_DATE + INTERVAL '7 days'
+           FOR UPDATE OF m`
+        );
+        checked = due.length;
+        for (const m of due) {
+          const ownerId = m.owner_id ?? m.rock_owner_id ?? null;
+          await client.query(
+            `INSERT INTO issues (title, description, owner_id, status, priority, due_date, private, source, source_milestone_id)
+             VALUES ($1, $2, $3, 'in_progress', 'medium', $4, FALSE, 'manual', $5)`,
+            [m.title, `Milestone for rock: ${m.rock_title}`, ownerId, m.due_date, m.id]
+          );
+          await client.query(
+            'UPDATE rock_milestones SET promoted_to_todo_at = NOW() WHERE id = $1',
+            [m.id]
+          );
+          promoted++;
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      return { promoted, checked };
     },
   };
 
@@ -1023,6 +1067,41 @@ if (USE_PG) {
       db.rock_milestones = db.rock_milestones.filter(m => m.id !== +id);
       if (m) syncRockProgressFromMilestones(m.rock_id);
       persist(db);
+    },
+    // Promote each milestone due within 7 days to a to-do, exactly once.
+    promoteDue: async () => {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const cutoff = new Date(today); cutoff.setDate(cutoff.getDate() + 7);
+      const cutoffStr = cutoff.toISOString().slice(0,10);
+      const due = db.rock_milestones.filter(m =>
+        !m.done && !m.promoted_to_todo_at && m.due_date && m.due_date.slice(0,10) <= cutoffStr
+      );
+      let promoted = 0;
+      for (const m of due) {
+        const rock = db.rocks.find(r => r.id === m.rock_id);
+        const ownerId = m.owner_id ?? rock?.owner_id ?? null;
+        const issue = {
+          id: nextId('issues'),
+          title: m.title,
+          description: `Milestone for rock: ${rock ? rock.title : ''}`,
+          owner_id: ownerId,
+          status: 'in_progress',
+          priority: 'medium',
+          archived: false,
+          private: false,
+          due_date: m.due_date,
+          source: 'manual',
+          source_milestone_id: m.id,
+          created_at: nowStr(),
+          updated_at: nowStr(),
+        };
+        db.issues.push(issue);
+        m.promoted_to_todo_at = nowStr();
+        m.updated_at = nowStr();
+        promoted++;
+      }
+      persist(db);
+      return { promoted, checked: due.length };
     },
   };
 
