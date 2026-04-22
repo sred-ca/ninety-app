@@ -363,6 +363,25 @@ app.delete('/api/meetings/:id', wrap(async (req, res) => {
   await meetingQueries.delete(req.params.id); ok(res, { deleted: true });
 }));
 
+// ── Coaching read endpoints (session auth, scoped to current user) ───────────
+// These power the Stella tab in the UI. They run AFTER the /api cookie gate,
+// so req.userId is set by requireAuth; coaching data is always scoped by it.
+// Hidden when COACHING_ENABLED is off (tab won't show; API returns 404).
+app.get('/api/coaching/calls', requireCoachingFlag, wrap(async (req, res) => {
+  const limit  = +req.query.limit  || 20;
+  const offset = +req.query.offset || 0;
+  ok(res, await coachingQueries.listCalls(req.userId, limit, offset));
+}));
+app.get('/api/coaching/calls/:id', requireCoachingFlag, wrap(async (req, res) => {
+  const call = await coachingQueries.getCallById(req.params.id, req.userId);
+  if (!call) return fail(res, 'Not found', 404);
+  ok(res, call);
+}));
+app.get('/api/coaching/stats', requireCoachingFlag, wrap(async (req, res) => {
+  ok(res, await coachingQueries.getStats(req.userId));
+}));
+app.get('/api/coaching/enabled', (req, res) => ok(res, { enabled: COACHING_ENABLED }));
+
 // ── SPA catch-all ─────────────────────────────────────────────────────────────
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

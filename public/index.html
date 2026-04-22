@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -67,6 +67,10 @@
         <button class="nav-item" data-view="insights">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           <span>Insights</span>
+        </button>
+        <button class="nav-item" data-view="stella" id="stella-nav-item" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Stella</span>
         </button>
       </nav>
 
@@ -468,6 +472,35 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- ── Stella View ─────────────────────────────────────── -->
+      <section id="view-stella" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Stella</h1>
+            <p class="view-subtitle">Your daily reflection coach</p>
+          </div>
+        </div>
+
+        <!-- Stats strip -->
+        <div class="stella-stats" id="stella-stats"></div>
+
+        <!-- Hero: latest call -->
+        <div class="stella-hero" id="stella-hero"></div>
+
+        <!-- Timeline -->
+        <div class="stella-timeline-header">
+          <h2>Timeline</h2>
+          <div class="stella-filters">
+            <label class="stella-filter">
+              <input type="checkbox" id="stella-filter-missed" />
+              <span>Only missed commitments</span>
+            </label>
+          </div>
+        </div>
+        <div id="stella-timeline" class="stella-timeline"></div>
+        <div id="stella-pager" class="stella-pager"></div>
       </section>
     </main>
   </div>

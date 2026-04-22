@@ -2417,3 +2417,111 @@ textarea { resize: vertical; min-height: 72px; }
   .chart-grid { grid-template-columns: 1fr; }
   .chart-card--wide { grid-column: 1; }
 }
+
+/* ── Stella (coaching) ────────────────────────────────────────────── */
+.stella-loading { color: var(--text2); padding: 24px; text-align: center; }
+.stella-empty-inline { color: var(--text2); font-style: italic; padding: 8px 0; }
+
+.stella-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stella-stat {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+}
+.stella-stat-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+.stella-stat-value { font-size: 24px; font-weight: 700; color: var(--text); margin-top: 4px; }
+.stella-stat-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+.stella-hero {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 24px; margin-bottom: 24px;
+}
+.stella-hero-empty { padding: 40px; text-align: center; color: var(--text2); }
+.stella-hero-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+}
+.stella-hero-eyebrow { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+.stella-hero-date { font-size: 18px; font-weight: 700; margin-top: 2px; }
+.stella-hero-section { margin-top: 16px; }
+.stella-hero-section h3 { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600; }
+
+.stella-commit {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-bottom: 6px; background: var(--surface2);
+}
+.stella-commit.done { opacity: 0.6; }
+.stella-commit.done .stella-commit-title { text-decoration: line-through; }
+.stella-commit-title { flex: 1; }
+.stella-commit-meta { font-size: 12px; color: var(--text2); }
+
+.stella-check {
+  width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--green); font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.stella-check[data-done="1"] { background: var(--green-bg); border-color: var(--green); }
+.stella-check:hover { border-color: var(--accent); }
+.stella-check-static { width: 22px; text-align: center; color: var(--text2); }
+
+.stella-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600;
+}
+.stella-badge.pri-high { background: var(--red-bg); color: var(--red); }
+.stella-badge.pri-low  { background: var(--blue-bg); color: var(--blue); }
+
+.stella-gratitude {
+  background: var(--surface2); border-left: 3px solid var(--accent);
+  padding: 10px 14px; border-radius: var(--radius-sm); color: var(--text);
+  white-space: pre-wrap;
+}
+
+.stella-timeline-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin: 8px 0 12px;
+}
+.stella-timeline-header h2 { font-size: 16px; font-weight: 700; }
+.stella-filter { display: inline-flex; gap: 6px; align-items: center; color: var(--text2); font-size: 13px; cursor: pointer; }
+
+.stella-timeline { display: flex; flex-direction: column; gap: 8px; }
+.stella-entry {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.stella-entry summary {
+  display: grid; grid-template-columns: 80px 160px 1fr; align-items: center; gap: 12px;
+  padding: 12px 16px; cursor: pointer; list-style: none;
+}
+.stella-entry summary::-webkit-details-marker { display: none; }
+.stella-entry[open] summary { border-bottom: 1px solid var(--border); }
+.stella-entry-date    { font-weight: 600; }
+.stella-entry-status  { color: var(--text2); font-size: 13px; }
+.stella-entry-summary { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stella-entry-body { padding: 12px 16px 16px; }
+.stella-entry-body h4 { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin: 12px 0 6px; }
+.stella-entry-body h4:first-child { margin-top: 0; }
+
+.stella-pager {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 16px 0;
+}
+.stella-pager-info { color: var(--text2); font-size: 13px; }
+
+.modal-large { max-width: 720px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; }
+.modal-large .modal-body { overflow: auto; }
+.stella-transcript {
+  white-space: pre-wrap; font-family: var(--font); font-size: 13px;
+  color: var(--text); background: var(--surface2);
+  padding: 16px; border-radius: var(--radius-sm); line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .stella-entry summary { grid-template-columns: 70px 1fr; }
+  .stella-entry-summary { display: none; }
+}

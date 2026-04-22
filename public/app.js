@@ -217,6 +217,10 @@ function enterApp(user) {
   qs('#login-screen').classList.add('hidden');
   qs('#app').classList.remove('hidden');
   updateSidebarUser();
+  // Show the Stella nav only when coaching is enabled on the server.
+  api.get('/api/coaching/enabled').then(d => {
+    if (d && d.enabled) qs('#stella-nav-item').style.display = '';
+  }).catch(() => { /* silent — coaching flag is optional */ });
   loadAll();
 }
 
@@ -240,6 +244,7 @@ qsa('.nav-item').forEach(btn => {
     if (view === 'my90')      loadMy90();
     if (view === 'meetings')  loadMeetings();
     if (view === 'insights')  loadInsights();
+    if (view === 'stella')    loadStella();
   });
 });
 
@@ -2614,6 +2619,200 @@ function renderInsightsMeetings() {
                 y: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true } } },
   });
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   STELLA  (coaching tab — read-only view of daily-reflection calls)
+   ════════════════════════════════════════════════════════════════════ */
+
+const stellaState = { offset: 0, pageSize: 20, hasMore: false, filterMissed: false };
+
+async function loadStella() {
+  qs('#stella-stats').innerHTML   = '<div class="stella-loading">Loading stats…</div>';
+  qs('#stella-hero').innerHTML    = '';
+  qs('#stella-timeline').innerHTML = '<div class="stella-loading">Loading timeline…</div>';
+  qs('#stella-pager').innerHTML = '';
+  try {
+    const [stats, page] = await Promise.all([
+      api.get('/api/coaching/stats'),
+      api.get(`/api/coaching/calls?limit=${stellaState.pageSize}&offset=${stellaState.offset}`),
+    ]);
+    renderStellaStats(stats);
+    renderStellaHero(page.calls[0] || null);
+    stellaState.hasMore = !!page.has_more;
+    renderStellaTimeline(page.calls.slice(1));
+    renderStellaPager();
+  } catch (e) {
+    qs('#stella-timeline').innerHTML = `<div class="empty-state"><p>Couldn't load Stella data: ${esc(e.message)}</p></div>`;
+  }
+}
+
+function renderStellaStats(s) {
+  const { calls, streak_days, completion } = s;
+  const box = (label, value, sub) =>
+    `<div class="stella-stat"><div class="stella-stat-label">${label}</div>`
+    + `<div class="stella-stat-value">${value}</div>`
+    + (sub ? `<div class="stella-stat-sub">${sub}</div>` : '')
+    + '</div>';
+  const pct = (w) => completion[w].pct == null
+    ? '—'
+    : `${completion[w].pct}% <span class="stella-stat-sub">(${completion[w].done}/${completion[w].total})</span>`;
+  qs('#stella-stats').innerHTML = [
+    box('Streak', `${streak_days}🔥`, streak_days === 1 ? 'day' : 'days'),
+    box('Calls (7d)',  calls.calls_7d,  `${calls.calls_30d} in 30d`),
+    box('Done (7d)',   pct('last_7d'),  'commitments completed'),
+    box('Done (30d)',  pct('last_30d'), 'commitments completed'),
+    box('Done (90d)',  pct('last_90d'), 'commitments completed'),
+  ].join('');
+}
+
+function renderStellaHero(call) {
+  if (!call) {
+    qs('#stella-hero').innerHTML = '<div class="stella-hero-empty">No calls yet. Make your first call to Stella and it\'ll show up here.</div>';
+    return;
+  }
+  const commitsHtml = renderCommitmentList(call.commitments, true);
+  const gratitude = call.gratitude ? `<div class="stella-hero-section"><h3>Gratitude</h3><div class="stella-gratitude">${esc(call.gratitude)}</div></div>` : '';
+  const summary   = call.summary   ? `<div class="stella-hero-section"><h3>Summary</h3><p>${esc(call.summary)}</p></div>` : '';
+  qs('#stella-hero').innerHTML = `
+    <div class="stella-hero-header">
+      <div>
+        <div class="stella-hero-eyebrow">Latest call</div>
+        <div class="stella-hero-date">${formatDateLong(call.call_date)}</div>
+      </div>
+      <button class="btn btn-ghost btn-small" data-view-transcript="${call.id}">View transcript</button>
+    </div>
+    <div class="stella-hero-section">
+      <h3>Commitments</h3>
+      ${commitsHtml}
+    </div>
+    ${gratitude}
+    ${summary}
+  `;
+}
+
+function renderCommitmentList(commits, withToggle) {
+  if (!commits || !commits.length) return '<p class="stella-empty-inline">(no commitments from this call)</p>';
+  const rows = commits.map(c => {
+    const done = c.completed;
+    const cls = done ? 'stella-commit done' : 'stella-commit';
+    const toggle = withToggle
+      ? `<button class="stella-check" data-toggle-commit="${c.id}" data-done="${done ? '1' : '0'}" aria-label="${done ? 'Mark open' : 'Mark done'}">${done ? '✓' : ''}</button>`
+      : `<span class="stella-check-static">${done ? '✓' : '○'}</span>`;
+    const due = c.due_date ? `<span class="stella-commit-meta">${formatDateShort(c.due_date)}</span>` : '';
+    const pri = c.priority && c.priority !== 'medium' ? `<span class="stella-badge pri-${c.priority}">${c.priority}</span>` : '';
+    return `<div class="${cls}">${toggle}<div class="stella-commit-title">${esc(c.title)}</div>${pri}${due}</div>`;
+  });
+  return rows.join('');
+}
+
+function renderStellaTimeline(calls) {
+  const list = qs('#stella-timeline');
+  const filter = stellaState.filterMissed;
+  const filtered = filter
+    ? calls.filter(c => (c.commitments || []).some(x => !x.completed))
+    : calls;
+  if (!filtered.length) {
+    list.innerHTML = '<div class="stella-empty-inline">No earlier calls on this page.</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(c => {
+    const commits = (c.commitments || []);
+    const done = commits.filter(x => x.completed).length;
+    const statusLine = commits.length
+      ? `${done}/${commits.length} commitment${commits.length === 1 ? '' : 's'} done`
+      : 'no commitments';
+    return `
+      <details class="stella-entry">
+        <summary>
+          <span class="stella-entry-date">${formatDateShort(c.call_date)}</span>
+          <span class="stella-entry-status">${statusLine}</span>
+          <span class="stella-entry-summary">${c.summary ? esc(truncate(c.summary, 100)) : '(no summary)'}</span>
+        </summary>
+        <div class="stella-entry-body">
+          ${commits.length ? `<h4>Commitments</h4>${renderCommitmentList(commits, true)}` : ''}
+          ${c.gratitude ? `<h4>Gratitude</h4><div class="stella-gratitude">${esc(c.gratitude)}</div>` : ''}
+          ${c.summary ? `<h4>Summary</h4><p>${esc(c.summary)}</p>` : ''}
+          <button class="btn btn-ghost btn-small" data-view-transcript="${c.id}">View transcript</button>
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+function renderStellaPager() {
+  const pager = qs('#stella-pager');
+  const { offset, pageSize, hasMore } = stellaState;
+  if (offset === 0 && !hasMore) { pager.innerHTML = ''; return; }
+  const prev = offset > 0
+    ? `<button class="btn btn-ghost btn-small" id="stella-prev">← Newer</button>`
+    : `<button class="btn btn-ghost btn-small" disabled>← Newer</button>`;
+  const next = hasMore
+    ? `<button class="btn btn-ghost btn-small" id="stella-next">Older →</button>`
+    : `<button class="btn btn-ghost btn-small" disabled>Older →</button>`;
+  const from = offset + 1;
+  pager.innerHTML = `${prev}<span class="stella-pager-info">Page ${Math.floor(offset / pageSize) + 1}</span>${next}`;
+  if (offset > 0) qs('#stella-prev').addEventListener('click', () => { stellaState.offset = Math.max(0, offset - pageSize); loadStella(); });
+  if (hasMore)    qs('#stella-next').addEventListener('click', () => { stellaState.offset += pageSize; loadStella(); });
+}
+
+/* Commitment check-off + transcript modal + filter */
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  if (t.matches('[data-toggle-commit]')) {
+    const id   = t.dataset.toggleCommit;
+    const done = t.dataset.done === '1';
+    t.disabled = true;
+    try {
+      await api.put(`/api/issues/${id}`, { status: done ? 'in_progress' : 'solved' });
+      loadStella();
+    } catch (err) { alert('Could not update: ' + err.message); t.disabled = false; }
+  }
+  if (t.matches('[data-view-transcript]')) {
+    const id = t.dataset.viewTranscript;
+    try {
+      const call = await api.get(`/api/coaching/calls/${id}`);
+      openStellaTranscript(call);
+    } catch (err) { alert('Could not load transcript: ' + err.message); }
+  }
+});
+qs('#stella-filter-missed')?.addEventListener('change', (e) => {
+  stellaState.filterMissed = e.target.checked;
+  loadStella();
+});
+
+function openStellaTranscript(call) {
+  const existing = qs('#stella-transcript-modal');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.id = 'stella-transcript-modal';
+  el.className = 'modal-overlay';
+  el.innerHTML = `
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <h3>Transcript — ${formatDateLong(call.call_date)}</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre class="stella-transcript">${esc(call.transcript || '(no transcript stored)')}</pre>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  el.querySelector('.modal-close').addEventListener('click', close);
+  el.addEventListener('click', (ev) => { if (ev.target === el) close(); });
+}
+
+function formatDateShort(d) {
+  if (!d) return '';
+  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+function formatDateLong(d) {
+  if (!d) return '';
+  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
+  return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
 /* ── Load all ────────────────────────────────────────────────────── */
 async function loadAll() {

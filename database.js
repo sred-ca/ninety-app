@@ -523,6 +523,123 @@ if (USE_PG) {
         active_rocks: rocks.rows,
       };
     },
+
+    // Paginated timeline for the Stella tab. Returns calls (without transcript)
+    // with their linked to-dos + completion status; excludes calls with no
+    // transcript AND no commitments AND no summary (skips empty smoke-test probes).
+    listCalls: async (user_id, limit, offset) => {
+      const lim = Math.min(Math.max(+limit || 20, 1), 100);
+      const off = Math.max(+offset || 0, 0);
+      const calls = await pool.query(
+        `SELECT id, call_date, summary, gratitude, created_at
+         FROM coaching_calls
+         WHERE user_id = $1
+           AND (summary IS NOT NULL OR transcript IS NOT NULL
+                OR EXISTS (SELECT 1 FROM coaching_commitments cc WHERE cc.call_id = coaching_calls.id))
+         ORDER BY call_date DESC, created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [user_id, lim, off]
+      );
+      if (!calls.rows.length) return { calls: [], has_more: false };
+
+      const ids = calls.rows.map(c => c.id);
+      const commits = await pool.query(
+        `SELECT cc.call_id, i.id, i.title, i.priority, i.due_date,
+                (i.status = 'solved') AS completed, i.status
+         FROM coaching_commitments cc
+         JOIN issues i ON i.id = cc.issue_id
+         WHERE cc.call_id = ANY($1::int[])
+         ORDER BY cc.id ASC`,
+        [ids]
+      );
+      const byCall = {};
+      commits.rows.forEach(r => {
+        (byCall[r.call_id] = byCall[r.call_id] || []).push({
+          id: r.id, title: r.title, priority: r.priority,
+          due_date: r.due_date, completed: r.completed, status: r.status,
+        });
+      });
+      const rows = calls.rows.map(c => ({ ...c, commitments: byCall[c.id] || [] }));
+      // Cheap has_more probe: if we filled the page, there may be more
+      const more = await pool.query(
+        `SELECT 1 FROM coaching_calls WHERE user_id=$1
+           AND (summary IS NOT NULL OR transcript IS NOT NULL
+                OR EXISTS (SELECT 1 FROM coaching_commitments cc WHERE cc.call_id = coaching_calls.id))
+         ORDER BY call_date DESC, created_at DESC OFFSET $2 LIMIT 1`,
+        [user_id, off + lim]
+      );
+      return { calls: rows, has_more: more.rows.length > 0 };
+    },
+
+    getCallById: async (call_id, user_id) => {
+      const call = await pool.query(
+        `SELECT id, call_date, summary, gratitude, transcript, created_at
+         FROM coaching_calls WHERE id=$1 AND user_id=$2`,
+        [call_id, user_id]
+      );
+      if (!call.rows.length) return null;
+      const commits = await pool.query(
+        `SELECT i.id, i.title, i.priority, i.due_date, i.description,
+                (i.status = 'solved') AS completed, i.status
+         FROM coaching_commitments cc
+         JOIN issues i ON i.id = cc.issue_id
+         WHERE cc.call_id = $1 ORDER BY cc.id ASC`,
+        [call_id]
+      );
+      return { ...call.rows[0], commitments: commits.rows };
+    },
+
+    getStats: async (user_id) => {
+      const res = await pool.query(
+        `SELECT
+           COUNT(*)::int AS all_calls,
+           COUNT(*) FILTER (WHERE call_date >= CURRENT_DATE - INTERVAL '6 days')::int  AS calls_7d,
+           COUNT(*) FILTER (WHERE call_date >= CURRENT_DATE - INTERVAL '29 days')::int AS calls_30d,
+           COUNT(*) FILTER (WHERE call_date >= CURRENT_DATE - INTERVAL '89 days')::int AS calls_90d
+         FROM coaching_calls WHERE user_id = $1`,
+        [user_id]
+      );
+      const commitRes = await pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '6 days')::int AS total_7d,
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '6 days'  AND i.status='solved')::int AS done_7d,
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '29 days')::int AS total_30d,
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '29 days' AND i.status='solved')::int AS done_30d,
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '89 days')::int AS total_90d,
+           COUNT(*) FILTER (WHERE cl.call_date >= CURRENT_DATE - INTERVAL '89 days' AND i.status='solved')::int AS done_90d
+         FROM coaching_commitments cc
+         JOIN coaching_calls cl ON cl.id = cc.call_id
+         JOIN issues i ON i.id = cc.issue_id
+         WHERE cl.user_id = $1`,
+        [user_id]
+      );
+      // Reuse streak logic from getContext
+      const streakRes = await pool.query(
+        `SELECT DISTINCT call_date FROM coaching_calls WHERE user_id=$1
+         ORDER BY call_date DESC LIMIT 60`, [user_id]
+      );
+      let streak = 0;
+      const today = new Date(); today.setHours(0,0,0,0);
+      let cursor = new Date(today);
+      const dateSet = new Set(streakRes.rows.map(r => new Date(r.call_date).toISOString().slice(0,10)));
+      if (!dateSet.has(cursor.toISOString().slice(0,10))) cursor.setDate(cursor.getDate() - 1);
+      while (dateSet.has(cursor.toISOString().slice(0,10))) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+
+      const pct = (d, t) => (t ? Math.round((d / t) * 100) : null);
+      const c = commitRes.rows[0];
+      return {
+        calls: res.rows[0],
+        streak_days: streak,
+        completion: {
+          last_7d:  { total: c.total_7d,  done: c.done_7d,  pct: pct(c.done_7d,  c.total_7d)  },
+          last_30d: { total: c.total_30d, done: c.done_30d, pct: pct(c.done_30d, c.total_30d) },
+          last_90d: { total: c.total_90d, done: c.done_90d, pct: pct(c.done_90d, c.total_90d) },
+        },
+      };
+    },
   };
 
   const MILESTONE_Q = `
@@ -1015,6 +1132,80 @@ if (USE_PG) {
         .map(r => ({ id: r.id, title: r.title, status: r.status, progress: r.progress }));
 
       return { yesterday_commitments, streak_days: streak, active_rocks };
+    },
+
+    listCalls: async (user_id, limit, offset) => {
+      const uid = +user_id;
+      const lim = Math.min(Math.max(+limit || 20, 1), 100);
+      const off = Math.max(+offset || 0, 0);
+      const all = db.coaching_calls
+        .filter(c => c.user_id === uid)
+        .filter(c => c.summary || c.transcript || db.coaching_commitments.some(cc => cc.call_id === c.id))
+        .sort((a, b) => (b.call_date + 'Z' + b.created_at).localeCompare(a.call_date + 'Z' + a.created_at));
+      const page = all.slice(off, off + lim).map(c => {
+        const commits = db.coaching_commitments
+          .filter(cc => cc.call_id === c.id)
+          .map(cc => {
+            const i = db.issues.find(x => x.id === cc.issue_id);
+            return i ? { id: i.id, title: i.title, priority: i.priority, due_date: i.due_date,
+              completed: i.status === 'solved', status: i.status } : null;
+          }).filter(Boolean);
+        return { id: c.id, call_date: c.call_date, summary: c.summary,
+          gratitude: c.gratitude, created_at: c.created_at, commitments: commits };
+      });
+      return { calls: page, has_more: all.length > off + lim };
+    },
+
+    getCallById: async (call_id, user_id) => {
+      const uid = +user_id;
+      const c = db.coaching_calls.find(x => x.id === +call_id && x.user_id === uid);
+      if (!c) return null;
+      const commits = db.coaching_commitments
+        .filter(cc => cc.call_id === c.id)
+        .map(cc => {
+          const i = db.issues.find(x => x.id === cc.issue_id);
+          return i ? { id: i.id, title: i.title, priority: i.priority, due_date: i.due_date,
+            description: i.description, completed: i.status === 'solved', status: i.status } : null;
+        }).filter(Boolean);
+      return { ...c, commitments: commits };
+    },
+
+    getStats: async (user_id) => {
+      const uid = +user_id;
+      const dayMs = 24 * 60 * 60 * 1000;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const cutoff = (days) => new Date(today.getTime() - (days - 1) * dayMs).toISOString().slice(0,10);
+
+      const userCalls = db.coaching_calls.filter(c => c.user_id === uid);
+      const allCount = userCalls.length;
+      const countFrom = (d) => userCalls.filter(c => c.call_date >= d).length;
+
+      const allCommits = db.coaching_commitments.map(cc => {
+        const call = db.coaching_calls.find(c => c.id === cc.call_id);
+        const issue = db.issues.find(i => i.id === cc.issue_id);
+        return call && issue && call.user_id === uid ? { call_date: call.call_date, completed: issue.status === 'solved' } : null;
+      }).filter(Boolean);
+      const windowStats = (days) => {
+        const from = cutoff(days);
+        const w = allCommits.filter(c => c.call_date >= from);
+        const done = w.filter(c => c.completed).length;
+        return { total: w.length, done, pct: w.length ? Math.round(done / w.length * 100) : null };
+      };
+
+      const userCallDates = new Set(userCalls.map(c => c.call_date));
+      let streak = 0;
+      let cursor = new Date(today);
+      if (!userCallDates.has(cursor.toISOString().slice(0,10))) cursor = new Date(cursor.getTime() - dayMs);
+      while (userCallDates.has(cursor.toISOString().slice(0,10))) {
+        streak++;
+        cursor = new Date(cursor.getTime() - dayMs);
+      }
+
+      return {
+        calls: { all_calls: allCount, calls_7d: countFrom(cutoff(7)), calls_30d: countFrom(cutoff(30)), calls_90d: countFrom(cutoff(90)) },
+        streak_days: streak,
+        completion: { last_7d: windowStats(7), last_30d: windowStats(30), last_90d: windowStats(90) },
+      };
     },
   };
 
