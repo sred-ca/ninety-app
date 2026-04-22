@@ -382,20 +382,13 @@ function openRockModal(editId) {
   const qSel = qs('#rock-quarter');
   qSel.innerHTML = allQ.map(q => `<option value="${q}" ${rock ? (rock.quarter === q ? 'selected' : '') : (q === (state.quarterFilter || currentQuarter()) ? 'selected' : '')}>${q}</option>`).join('');
 
-  // Milestones section
+  // Milestones section — only shown when editing an existing rock.
   state.currentMilestones = [];
   state.currentMilestoneRockId = rock ? rock.id : null;
-  qs('#milestones-section').hidden = false;
   qs('#milestones-list').innerHTML = '';
   qs('#milestones-count').textContent = '0';
-  if (rock) {
-    qs('#add-milestone-btn').hidden = false;
-    qs('#milestones-save-first').hidden = true;
-    loadAndRenderMilestones(rock.id);
-  } else {
-    qs('#add-milestone-btn').hidden = true;
-    qs('#milestones-save-first').hidden = false;
-  }
+  qs('#milestones-section').hidden = !rock;
+  if (rock) loadAndRenderMilestones(rock.id);
 
   openModal('rock-modal');
   qs('#rock-title').focus();

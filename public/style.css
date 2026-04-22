@@ -804,10 +804,6 @@ textarea { resize: vertical; min-height: 72px; }
   color: var(--text2);
   margin: 2px 0 12px;
 }
-.milestones-save-first {
-  font-style: italic;
-  margin-top: 10px;
-}
 .milestones-add {
   color: var(--accent) !important;
   padding: 6px 10px !important;
