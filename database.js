@@ -110,12 +110,32 @@ if (USE_PG) {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CHECK (top_rank IS NULL OR top_rank BETWEEN 1 AND 3)
       );
+
+      CREATE TABLE IF NOT EXISTS coaching_calls (
+        id          SERIAL PRIMARY KEY,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        call_date   DATE NOT NULL DEFAULT CURRENT_DATE,
+        summary     TEXT,
+        gratitude   TEXT,
+        transcript  TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS coaching_commitments (
+        id        SERIAL PRIMARY KEY,
+        call_id   INTEGER NOT NULL REFERENCES coaching_calls(id) ON DELETE CASCADE,
+        issue_id  INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_coaching_calls_user ON coaching_calls(user_id, call_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_coaching_commitments_call ON coaching_commitments(call_id);
     `);
     // Migrate existing tables that may lack newer columns
     await pool.query(`
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS private  BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS source   TEXT NOT NULL DEFAULT 'manual';
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_issues BOOLEAN NOT NULL DEFAULT FALSE;
@@ -221,10 +241,10 @@ if (USE_PG) {
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
-    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source }) => {
       const { rows } = await pool.query(
-        'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null, !!isPrivate]
+        'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null, !!isPrivate, source || 'manual']
       );
       return issueQueries.getById(rows[0].id);
     },
@@ -410,7 +430,98 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries };
+  const coachingQueries = {
+    // Creates a coaching call + its commitments (as issues, source='coaching', private=true)
+    // atomically. Returns { call_id, issue_ids }.
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments }) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const call = await client.query(
+          `INSERT INTO coaching_calls (user_id, summary, gratitude, transcript)
+           VALUES ($1,$2,$3,$4) RETURNING id, call_date, created_at`,
+          [user_id, summary || null, gratitude || null, transcript || null]
+        );
+        const callId = call.rows[0].id;
+        // Default due: tomorrow 23:59 in server TZ
+        const due = new Date(); due.setDate(due.getDate() + 1);
+        const dueStr = due.toISOString().slice(0, 10);
+
+        const issueIds = [];
+        for (const c of (commitments || [])) {
+          const t = (c && c.title ? String(c.title).trim() : '');
+          if (!t) continue;
+          const i = await client.query(
+            `INSERT INTO issues (title, description, owner_id, status, priority, due_date, private, source)
+             VALUES ($1,$2,$3,'in_progress',$4,$5,TRUE,'coaching') RETURNING id`,
+            [t, c.description || null, user_id, c.priority || 'medium', c.due_date || dueStr]
+          );
+          const issueId = i.rows[0].id;
+          await client.query(
+            'INSERT INTO coaching_commitments (call_id, issue_id) VALUES ($1,$2)',
+            [callId, issueId]
+          );
+          issueIds.push(issueId);
+        }
+        await client.query('COMMIT');
+        return { call_id: callId, issue_ids: issueIds };
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+
+    // Context Stella reads before each call: yesterday's commitments + completion,
+    // current streak (consecutive calendar days with any call), active rocks.
+    getContext: async (user_id) => {
+      const yesterday = await pool.query(
+        `SELECT i.id, i.title, (i.status='solved') AS completed
+         FROM coaching_commitments cc
+         JOIN coaching_calls cl ON cl.id = cc.call_id
+         JOIN issues i ON i.id = cc.issue_id
+         WHERE cl.user_id = $1 AND cl.call_date = CURRENT_DATE - INTERVAL '1 day'
+         ORDER BY cc.id ASC`,
+        [user_id]
+      );
+
+      // Streak: count consecutive days back from today (or yesterday if no call today)
+      // where at least one call exists for this user.
+      const streakRes = await pool.query(
+        `WITH days AS (
+           SELECT DISTINCT call_date FROM coaching_calls WHERE user_id=$1
+         )
+         SELECT call_date FROM days ORDER BY call_date DESC LIMIT 60`,
+        [user_id]
+      );
+      let streak = 0;
+      const today = new Date(); today.setHours(0,0,0,0);
+      let cursor = new Date(today);
+      const dateSet = new Set(streakRes.rows.map(r => new Date(r.call_date).toISOString().slice(0,10)));
+      // If no call today, start streak count from yesterday
+      if (!dateSet.has(cursor.toISOString().slice(0,10))) cursor.setDate(cursor.getDate() - 1);
+      while (dateSet.has(cursor.toISOString().slice(0,10))) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+
+      const rocks = await pool.query(
+        `SELECT id, title, status, progress FROM rocks
+         WHERE owner_id=$1 AND status <> 'complete'
+         ORDER BY created_at DESC`,
+        [user_id]
+      );
+
+      return {
+        yesterday_commitments: yesterday.rows,
+        streak_days: streak,
+        active_rocks: rocks.rows,
+      };
+    },
+  };
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries };
 
 } else {
 
@@ -541,10 +652,11 @@ if (USE_PG) {
         .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
-    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, status: 'in_progress', priority: priority || 'medium',
-        archived: false, private: !!isPrivate, due_date: due_date || null, created_at: nowStr(), updated_at: nowStr() };
+        archived: false, private: !!isPrivate, due_date: due_date || null,
+        source: source || 'manual', created_at: nowStr(), updated_at: nowStr() };
       db.issues.push(issue); persist(db); return enrichIssue(issue);
     },
     update: async (id, fields) => {
@@ -720,5 +832,77 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries };
+  if (!db.coaching_calls)        { db.coaching_calls = []; }
+  if (!db.coaching_commitments)  { db.coaching_commitments = []; }
+  if (!db._seq.coaching_calls)   { db._seq.coaching_calls = 0; }
+  if (!db._seq.coaching_commitments) { db._seq.coaching_commitments = 0; }
+  persist(db);
+
+  const coachingQueries = {
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments }) => {
+      const uid = +user_id;
+      const callDate = new Date().toISOString().slice(0,10);
+      const call = { id: nextId('coaching_calls'), user_id: uid, call_date: callDate,
+        summary: summary || null, gratitude: gratitude || null, transcript: transcript || null,
+        created_at: nowStr() };
+      db.coaching_calls.push(call);
+
+      const due = new Date(); due.setDate(due.getDate() + 1);
+      const dueStr = due.toISOString().slice(0, 10);
+      const issueIds = [];
+      for (const c of (commitments || [])) {
+        const t = (c && c.title ? String(c.title).trim() : '');
+        if (!t) continue;
+        const issue = {
+          id: nextId('issues'), title: t, description: c.description || null,
+          owner_id: uid, status: 'in_progress', priority: c.priority || 'medium',
+          archived: false, private: true, due_date: c.due_date || dueStr,
+          source: 'coaching', created_at: nowStr(), updated_at: nowStr(),
+        };
+        db.issues.push(issue);
+        db.coaching_commitments.push({
+          id: nextId('coaching_commitments'), call_id: call.id, issue_id: issue.id,
+        });
+        issueIds.push(issue.id);
+      }
+      persist(db);
+      return { call_id: call.id, issue_ids: issueIds };
+    },
+
+    getContext: async (user_id) => {
+      const uid = +user_id;
+      const dayMs = 24 * 60 * 60 * 1000;
+      const today = new Date(); today.setHours(0,0,0,0);
+      const yesterdayStr = new Date(today.getTime() - dayMs).toISOString().slice(0,10);
+
+      const ydayCalls = db.coaching_calls.filter(c => c.user_id === uid && c.call_date === yesterdayStr);
+      const ydayCallIds = new Set(ydayCalls.map(c => c.id));
+      const ydayCommits = db.coaching_commitments.filter(cc => ydayCallIds.has(cc.call_id));
+      const yesterday_commitments = ydayCommits.map(cc => {
+        const i = db.issues.find(x => x.id === cc.issue_id);
+        return i ? { id: i.id, title: i.title, completed: i.status === 'solved' } : null;
+      }).filter(Boolean);
+
+      const userCallDates = new Set(
+        db.coaching_calls.filter(c => c.user_id === uid).map(c => c.call_date)
+      );
+      let streak = 0;
+      let cursor = new Date(today);
+      if (!userCallDates.has(cursor.toISOString().slice(0,10))) {
+        cursor = new Date(cursor.getTime() - dayMs);
+      }
+      while (userCallDates.has(cursor.toISOString().slice(0,10))) {
+        streak++;
+        cursor = new Date(cursor.getTime() - dayMs);
+      }
+
+      const active_rocks = db.rocks
+        .filter(r => r.owner_id === uid && r.status !== 'complete')
+        .map(r => ({ id: r.id, title: r.title, status: r.status, progress: r.progress }));
+
+      return { yesterday_commitments, streak_days: streak, active_rocks };
+    },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries };
 }

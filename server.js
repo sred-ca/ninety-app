@@ -1,7 +1,7 @@
 const express    = require('express');
 const path       = require('path');
 const crypto     = require('crypto');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries } = require('./database');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -154,6 +154,43 @@ app.get('/auth/logout', (req, res) => {
   res.clearCookie(COOKIE_NAME);
   res.redirect('/');
 });
+
+// ── Coaching integration (LifeCoach/Stella) ──────────────────────────────────
+// Registered BEFORE the /api cookie-auth gate so external services can hit
+// these with a Bearer API key instead of a browser session. Feature-flagged.
+// Phase 1 is single-user: data is attributed to NINETY_COACHING_USER_EMAIL.
+const COACHING_ENABLED    = process.env.COACHING_ENABLED === 'true';
+const NINETY_API_KEY      = process.env.NINETY_API_KEY;
+const COACHING_USER_EMAIL = process.env.NINETY_COACHING_USER_EMAIL;
+
+function requireCoachingFlag(req, res, next) {
+  if (!COACHING_ENABLED) return fail(res, 'Not found', 404);
+  next();
+}
+function requireApiKey(req, res, next) {
+  if (!NINETY_API_KEY) return fail(res, 'Coaching API key not configured', 500);
+  const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  if (token !== NINETY_API_KEY) return fail(res, 'Unauthorized', 401);
+  next();
+}
+async function resolveCoachingUser(res) {
+  if (!COACHING_USER_EMAIL) { fail(res, 'NINETY_COACHING_USER_EMAIL not configured', 500); return null; }
+  return await userQueries.findOrCreateByEmail(COACHING_USER_EMAIL, 'Jude');
+}
+
+app.post('/api/coaching/calls', requireCoachingFlag, requireApiKey, wrap(async (req, res) => {
+  const user = await resolveCoachingUser(res); if (!user) return;
+  const { summary, gratitude, transcript, commitments } = req.body || {};
+  if (!Array.isArray(commitments)) return fail(res, 'commitments must be an array');
+  ok(res, await coachingQueries.createCall({
+    user_id: user.id, summary, gratitude, transcript, commitments,
+  }));
+}));
+
+app.get('/api/coaching/context', requireCoachingFlag, requireApiKey, wrap(async (req, res) => {
+  const user = await resolveCoachingUser(res); if (!user) return;
+  ok(res, await coachingQueries.getContext(user.id));
+}));
 
 // Everything below this line requires a signed auth cookie. /api/me above
 // opts out because it legitimately needs to return null for logged-out users.
