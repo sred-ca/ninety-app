@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -481,7 +481,16 @@
             <h1>Stella</h1>
             <p class="view-subtitle">Your daily reflection coach</p>
           </div>
+          <div class="view-header-right">
+            <button class="btn btn-ghost" id="stella-settings-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Settings
+            </button>
+          </div>
         </div>
+
+        <!-- Settings gate (shown when coaching is disabled for this user) -->
+        <div id="stella-settings-gate" class="stella-gate" style="display:none"></div>
 
         <!-- Stats strip -->
         <div class="stella-stats" id="stella-stats"></div>
@@ -814,6 +823,35 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-modal="confirm-modal">Cancel</button>
         <button class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Stella Settings Modal ─────────────────────────────── -->
+  <div id="stella-settings-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Stella Settings</h3>
+        <button class="modal-close" data-modal="stella-settings-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-check">
+            <input type="checkbox" id="stella-enable-toggle" />
+            <span>Enable Stella for my account</span>
+          </label>
+          <p class="form-hint">When enabled, commitments from your daily reflection call are synced to your private To-Dos.</p>
+        </div>
+        <div class="form-group">
+          <label for="stella-phone">Your Stella phone number</label>
+          <input type="tel" id="stella-phone" class="select-input" placeholder="+19404898092" />
+          <p class="form-hint">The number Stella recognises as yours. Use E.164 format (e.g. +19404898092). Admin-assigned — ask your admin if you don't have one.</p>
+        </div>
+        <div id="stella-settings-msg" class="form-msg"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="stella-settings-modal">Cancel</button>
+        <button class="btn btn-primary" id="stella-settings-save">Save</button>
       </div>
     </div>
   </div>

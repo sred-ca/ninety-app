@@ -2627,10 +2627,30 @@ function renderInsightsMeetings() {
 const stellaState = { offset: 0, pageSize: 20, hasMore: false, filterMissed: false };
 
 async function loadStella() {
-  qs('#stella-stats').innerHTML   = '<div class="stella-loading">Loading stats…</div>';
-  qs('#stella-hero').innerHTML    = '';
+  qs('#stella-settings-gate').style.display = 'none';
+  qs('#stella-stats').innerHTML    = '<div class="stella-loading">Loading stats…</div>';
+  qs('#stella-hero').innerHTML     = '';
   qs('#stella-timeline').innerHTML = '<div class="stella-loading">Loading timeline…</div>';
-  qs('#stella-pager').innerHTML = '';
+  qs('#stella-pager').innerHTML    = '';
+
+  // Gate: if coaching isn't enabled for this user, show onboarding card and stop.
+  let settings;
+  try { settings = await api.get('/api/coaching/settings'); } catch { settings = null; }
+  if (!settings || !settings.coaching_enabled) {
+    qs('#stella-stats').innerHTML = '';
+    qs('#stella-timeline').innerHTML = '';
+    const gate = qs('#stella-settings-gate');
+    gate.style.display = '';
+    gate.innerHTML = `
+      <h2>Welcome to Stella</h2>
+      <p>Stella is your daily reflection coach. She captures your commitments and gratitude from each call, and syncs them here as private To-Dos.</p>
+      <p class="form-hint">To get started, enable Stella and enter the phone number your admin has assigned you.</p>
+      <button class="btn btn-primary" id="stella-open-settings-from-gate">Enable Stella</button>
+    `;
+    qs('#stella-open-settings-from-gate').addEventListener('click', openStellaSettings);
+    return;
+  }
+
   try {
     const [stats, page] = await Promise.all([
       api.get('/api/coaching/stats'),
@@ -2645,6 +2665,41 @@ async function loadStella() {
     qs('#stella-timeline').innerHTML = `<div class="empty-state"><p>Couldn't load Stella data: ${esc(e.message)}</p></div>`;
   }
 }
+
+async function openStellaSettings() {
+  const msg = qs('#stella-settings-msg');
+  if (msg) { msg.textContent = ''; msg.className = 'form-msg'; }
+  try {
+    const s = await api.get('/api/coaching/settings');
+    qs('#stella-enable-toggle').checked = !!s.coaching_enabled;
+    qs('#stella-phone').value = s.coaching_phone || '';
+  } catch {
+    qs('#stella-enable-toggle').checked = false;
+    qs('#stella-phone').value = '';
+  }
+  qs('#stella-settings-modal').classList.add('active');
+}
+
+async function saveStellaSettings() {
+  const msg = qs('#stella-settings-msg');
+  const btn = qs('#stella-settings-save');
+  const enabled = qs('#stella-enable-toggle').checked;
+  const phone   = qs('#stella-phone').value.trim();
+  btn.disabled = true;
+  msg.textContent = 'Saving…'; msg.className = 'form-msg';
+  try {
+    await api.put('/api/coaching/settings', { coaching_enabled: enabled, coaching_phone: phone });
+    msg.textContent = 'Saved.'; msg.className = 'form-msg form-msg-ok';
+    setTimeout(() => { closeModal('stella-settings-modal'); loadStella(); }, 400);
+  } catch (e) {
+    msg.textContent = e.message; msg.className = 'form-msg form-msg-err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+qs('#stella-settings-btn')?.addEventListener('click', openStellaSettings);
+qs('#stella-settings-save')?.addEventListener('click', saveStellaSettings);
 
 function renderStellaStats(s) {
   const { calls, streak_days, completion } = s;

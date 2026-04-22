@@ -150,6 +150,9 @@ if (USE_PG) {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS source   TEXT NOT NULL DEFAULT 'manual';
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
+      ALTER TABLE users  ADD COLUMN IF NOT EXISTS coaching_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE users  ADD COLUMN IF NOT EXISTS coaching_phone   TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_coaching_phone ON users(coaching_phone) WHERE coaching_phone IS NOT NULL;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_issues BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE agenda_sections ADD COLUMN IF NOT EXISTS shows_todos  BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE rock_milestones ADD COLUMN IF NOT EXISTS promoted_to_todo_at TIMESTAMPTZ;
@@ -183,6 +186,14 @@ if (USE_PG) {
     getAll: async () => (await pool.query('SELECT * FROM users ORDER BY name')).rows,
     getById: async (id) => (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0] ?? null,
     getByEmail: async (email) => (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0] ?? null,
+    getByCoachingPhone: async (phone) => (await pool.query('SELECT * FROM users WHERE coaching_phone=$1', [phone])).rows[0] ?? null,
+    updateCoachingSettings: async (id, { coaching_enabled, coaching_phone }) => {
+      const { rows } = await pool.query(
+        'UPDATE users SET coaching_enabled=$1, coaching_phone=$2 WHERE id=$3 RETURNING *',
+        [!!coaching_enabled, coaching_phone || null, id]
+      );
+      return rows[0] ?? null;
+    },
     create: async (name, color) => (await pool.query(
       'INSERT INTO users (name,color) VALUES ($1,$2) RETURNING *', [name, color || '#6366f1']
     )).rows[0],
@@ -817,6 +828,14 @@ if (USE_PG) {
     getAll:   async () => [...db.users].sort((a,b) => a.name.localeCompare(b.name)),
     getById:  async (id) => db.users.find(u => u.id === +id) ?? null,
     getByEmail: async (email) => db.users.find(u => u.email === email) ?? null,
+    getByCoachingPhone: async (phone) => db.users.find(u => u.coaching_phone === phone) ?? null,
+    updateCoachingSettings: async (id, { coaching_enabled, coaching_phone }) => {
+      const u = db.users.find(x => x.id === +id); if (!u) return null;
+      u.coaching_enabled = !!coaching_enabled;
+      u.coaching_phone = coaching_phone || null;
+      persist(db);
+      return u;
+    },
     create:   async (name, color) => {
       const user = { id: nextId('users'), name, color: color || '#6366f1', created_at: nowStr() };
       db.users.push(user); persist(db); return user;

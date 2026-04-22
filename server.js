@@ -155,43 +155,77 @@ app.get('/auth/logout', (req, res) => {
   res.redirect('/');
 });
 
-// ── Coaching integration (LifeCoach/Stella) ──────────────────────────────────
-// Registered BEFORE the /api cookie-auth gate so external services can hit
-// these with a Bearer API key instead of a browser session. Feature-flagged.
-// Phase 1 is single-user: data is attributed to NINETY_COACHING_USER_EMAIL.
-const COACHING_ENABLED    = process.env.COACHING_ENABLED === 'true';
-const NINETY_API_KEY      = process.env.NINETY_API_KEY;
-const COACHING_USER_EMAIL = process.env.NINETY_COACHING_USER_EMAIL;
+// ── Coaching integration (Stella) ────────────────────────────────────────────
+// Write endpoints (POST calls, GET context) are called by Stella's back-end.
+// They carry two pieces of auth:
+//   - Bearer <NINETY_ADMIN_KEY>       — proves the caller is Stella, not a user
+//   - X-Coaching-User-Id: <id>        — identifies which Ninety user the call
+//                                       belongs to (phone→user lookup on their side)
+// Registered BEFORE the /api cookie gate so external services skip the session
+// auth. Backward compat: NINETY_API_KEY is still accepted as an alias for
+// NINETY_ADMIN_KEY, and NINETY_COACHING_USER_EMAIL still resolves the user if
+// no header is passed — both get dropped in a later phase.
+const COACHING_ENABLED       = process.env.COACHING_ENABLED === 'true';
+const NINETY_ADMIN_KEY       = process.env.NINETY_ADMIN_KEY || process.env.NINETY_API_KEY;
+const LEGACY_USER_EMAIL      = process.env.NINETY_COACHING_USER_EMAIL;
 
 function requireCoachingFlag(req, res, next) {
   if (!COACHING_ENABLED) return fail(res, 'Not found', 404);
   next();
 }
-function requireApiKey(req, res, next) {
-  if (!NINETY_API_KEY) return fail(res, 'Coaching API key not configured', 500);
+function requireAdminKey(req, res, next) {
+  if (!NINETY_ADMIN_KEY) return fail(res, 'Coaching admin key not configured', 500);
   const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
   const a = Buffer.from(token);
-  const b = Buffer.from(NINETY_API_KEY);
+  const b = Buffer.from(NINETY_ADMIN_KEY);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
   next();
 }
-async function resolveCoachingUser(res) {
-  if (!COACHING_USER_EMAIL) { fail(res, 'NINETY_COACHING_USER_EMAIL not configured', 500); return null; }
-  return await userQueries.findOrCreateByEmail(COACHING_USER_EMAIL, 'Jude');
+
+// Resolves the Ninety user this coaching request is for.
+// Preferred: X-Coaching-User-Id header (Stella's phone→user lookup).
+// Fallback: NINETY_COACHING_USER_EMAIL env var (legacy Phase 1 single-user).
+// Returns the user id, or null after writing an error response.
+async function resolveCoachingTarget(req, res) {
+  const headerId = req.headers['x-coaching-user-id'];
+  if (headerId) {
+    const u = await userQueries.getById(headerId);
+    if (!u) { fail(res, 'Unknown coaching user', 404); return null; }
+    if (!u.coaching_enabled) { fail(res, 'Coaching not enabled for this user', 403); return null; }
+    return u.id;
+  }
+  if (LEGACY_USER_EMAIL) {
+    const u = await userQueries.findOrCreateByEmail(LEGACY_USER_EMAIL, 'Jude');
+    return u.id;
+  }
+  fail(res, 'X-Coaching-User-Id header is required', 400);
+  return null;
 }
 
-app.post('/api/coaching/calls', requireCoachingFlag, requireApiKey, wrap(async (req, res) => {
-  const user = await resolveCoachingUser(res); if (!user) return;
+app.post('/api/coaching/calls', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
   const { summary, gratitude, transcript, commitments } = req.body || {};
   if (!Array.isArray(commitments)) return fail(res, 'commitments must be an array');
   ok(res, await coachingQueries.createCall({
-    user_id: user.id, summary, gratitude, transcript, commitments,
+    user_id: userId, summary, gratitude, transcript, commitments,
   }));
 }));
 
-app.get('/api/coaching/context', requireCoachingFlag, requireApiKey, wrap(async (req, res) => {
-  const user = await resolveCoachingUser(res); if (!user) return;
-  ok(res, await coachingQueries.getContext(user.id));
+app.get('/api/coaching/context', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
+  ok(res, await coachingQueries.getContext(userId));
+}));
+
+// Admin-scoped phone lookup. Stella uses this at call start to identify the
+// caller. Returns 404 if the phone isn't registered or coaching is disabled
+// for that user — which signals Stella to play the "talk to your admin"
+// message and hang up.
+app.get('/api/coaching/user-by-phone', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const phone = (req.query.phone || '').trim();
+  if (!phone) return fail(res, 'phone is required');
+  const u = await userQueries.getByCoachingPhone(phone);
+  if (!u || !u.coaching_enabled) return fail(res, 'Not found', 404);
+  ok(res, { user_id: u.id, name: u.name });
 }));
 
 // ── Cron jobs (Vercel Cron; authed via Bearer CRON_SECRET) ───────────────────
@@ -383,6 +417,36 @@ app.get('/api/coaching/stats', requireCoachingFlag, wrap(async (req, res) => {
   ok(res, await coachingQueries.getStats(req.userId));
 }));
 app.get('/api/coaching/enabled', (req, res) => ok(res, { enabled: COACHING_ENABLED }));
+
+// Per-user Stella settings (session auth — each user manages their own).
+app.get('/api/coaching/settings', requireCoachingFlag, wrap(async (req, res) => {
+  const u = await userQueries.getById(req.userId);
+  ok(res, {
+    coaching_enabled: !!u?.coaching_enabled,
+    coaching_phone:   u?.coaching_phone || null,
+  });
+}));
+app.put('/api/coaching/settings', requireCoachingFlag, wrap(async (req, res) => {
+  const { coaching_enabled, coaching_phone } = req.body || {};
+  // Light phone validation: allow empty or E.164 (digits, optional +, 7-16 chars).
+  if (coaching_phone && !/^\+?[0-9]{7,16}$/.test(String(coaching_phone).trim())) {
+    return fail(res, 'Phone must be digits in E.164 format (e.g. +19404898092)');
+  }
+  // Uniqueness is enforced by the DB unique index; surface it as a friendly error.
+  try {
+    const updated = await userQueries.updateCoachingSettings(req.userId, {
+      coaching_enabled: !!coaching_enabled,
+      coaching_phone:   coaching_phone ? String(coaching_phone).trim() : null,
+    });
+    ok(res, {
+      coaching_enabled: !!updated.coaching_enabled,
+      coaching_phone:   updated.coaching_phone || null,
+    });
+  } catch (e) {
+    if (e.code === '23505') return fail(res, 'Phone number already registered to another user');
+    throw e;
+  }
+}));
 
 // ── SPA catch-all ─────────────────────────────────────────────────────────────
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
