@@ -228,6 +228,65 @@ app.get('/api/coaching/user-by-phone', requireCoachingFlag, requireAdminKey, wra
   ok(res, { user_id: u.id, name: u.name });
 }));
 
+// Admin list of enabled coaching users. Used by the pre-call cron to iterate
+// and build per-user prompts.
+app.get('/api/coaching/enabled-users', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  ok(res, await coachingQueries.listEnabledUsers());
+}));
+
+// Pre-call builder pushes each user's rendered Stella system prompt here.
+// The prompt is a single string (the full system message), built per-user
+// from their markdown journal / commitments / wins / themes / personality.
+app.put('/api/coaching/assistant-prompt', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
+  const { system_prompt } = req.body || {};
+  if (!system_prompt || typeof system_prompt !== 'string') {
+    return fail(res, 'system_prompt (string) is required');
+  }
+  await coachingQueries.setAssistantPrompt(userId, system_prompt);
+  ok(res, { updated: true });
+}));
+
+// VAPI assistant-request webhook. VAPI hits this at inbound call start with
+// the caller's number; we look up the user, fetch their stored prompt, and
+// return an assistant override so Stella greets and remembers the right
+// person. Unknown callers get a short "contact your admin" handoff and the
+// call is ended server-side by VAPI.
+app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  // VAPI webhook payload shape:
+  //   { message: { type: 'assistant-request', call: { customer: { number: '+1...' } } } }
+  const msg    = req.body?.message || req.body || {};
+  const call   = msg.call || {};
+  const phone  = call.customer?.number || call.from || null;
+
+  const handoff = {
+    assistant: {
+      firstMessage: "I don't have you set up yet — please reach out to your admin to get started. Goodbye.",
+      endCallPhrases: ['goodbye']
+    }
+  };
+  if (!phone) return res.json(handoff);
+
+  const u = await userQueries.getByCoachingPhone(phone);
+  if (!u || !u.coaching_enabled) return res.json(handoff);
+
+  const p = await coachingQueries.getAssistantPrompt(u.id);
+  if (!p) return res.json(handoff);  // no prompt built yet
+
+  // VAPI accepts `assistantOverrides` to layer on top of a base assistant.
+  // We only override the system message; voice, tools, and other config are
+  // left to the base Stella assistant.
+  res.json({
+    assistantOverrides: {
+      model: {
+        messages: [{ role: 'system', content: p.system_prompt }]
+      },
+      // Keep metadata handy if VAPI logs it
+      metadata: { coaching_user_id: u.id, coaching_user_name: u.name }
+    }
+  });
+}));
+
 // ── Cron jobs (Vercel Cron; authed via Bearer CRON_SECRET) ───────────────────
 // Registered before the /api cookie gate so Vercel's cron invocation can
 // reach it without a session.
@@ -428,15 +487,23 @@ app.get('/api/coaching/settings', requireCoachingFlag, wrap(async (req, res) => 
 }));
 app.put('/api/coaching/settings', requireCoachingFlag, wrap(async (req, res) => {
   const { coaching_enabled, coaching_phone } = req.body || {};
-  // Light phone validation: allow empty or E.164 (digits, optional +, 7-16 chars).
-  if (coaching_phone && !/^\+?[0-9]{7,16}$/.test(String(coaching_phone).trim())) {
-    return fail(res, 'Phone must be digits in E.164 format (e.g. +19404898092)');
+  // Normalize to strict E.164: strip whitespace/punctuation, ensure leading +.
+  // VAPI sends phones with +, so our stored value must match for lookup.
+  // Heuristic: 10-digit number → assume North American, prepend '1'.
+  let normalized = null;
+  if (coaching_phone) {
+    let digits = String(coaching_phone).replace(/[^\d]/g, '');
+    if (digits.length === 10) digits = '1' + digits;
+    if (!/^[0-9]{7,16}$/.test(digits)) {
+      return fail(res, 'Phone must be 7–16 digits (e.g. +19404898092)');
+    }
+    normalized = '+' + digits;
   }
   // Uniqueness is enforced by the DB unique index; surface it as a friendly error.
   try {
     const updated = await userQueries.updateCoachingSettings(req.userId, {
       coaching_enabled: !!coaching_enabled,
-      coaching_phone:   coaching_phone ? String(coaching_phone).trim() : null,
+      coaching_phone:   normalized,
     });
     ok(res, {
       coaching_enabled: !!updated.coaching_enabled,

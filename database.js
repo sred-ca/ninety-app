@@ -139,6 +139,12 @@ if (USE_PG) {
         issue_id  INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS coaching_assistant_prompts (
+        user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        system_prompt TEXT NOT NULL,
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_coaching_calls_user ON coaching_calls(user_id, call_date DESC);
       CREATE INDEX IF NOT EXISTS idx_coaching_commitments_call ON coaching_commitments(call_id);
     `);
@@ -650,6 +656,37 @@ if (USE_PG) {
           last_90d: { total: c.total_90d, done: c.done_90d, pct: pct(c.done_90d, c.total_90d) },
         },
       };
+    },
+
+    // Stella's VAPI prompt storage. LifeCoach's pre-call builder renders each
+    // enabled user's full system prompt once per day and pushes it here via
+    // setAssistantPrompt. At call time, Ninety looks it up by user id and
+    // returns it to VAPI as an assistant override.
+    setAssistantPrompt: async (user_id, system_prompt) => {
+      await pool.query(
+        `INSERT INTO coaching_assistant_prompts (user_id, system_prompt, updated_at)
+         VALUES ($1,$2,NOW())
+         ON CONFLICT (user_id) DO UPDATE SET system_prompt=EXCLUDED.system_prompt, updated_at=NOW()`,
+        [user_id, system_prompt]
+      );
+    },
+    getAssistantPrompt: async (user_id) => {
+      const { rows } = await pool.query(
+        'SELECT system_prompt, updated_at FROM coaching_assistant_prompts WHERE user_id=$1',
+        [user_id]
+      );
+      return rows[0] ?? null;
+    },
+
+    // All users currently opted in. Used by the pre-call cron to iterate and
+    // build per-user prompts.
+    listEnabledUsers: async () => {
+      const { rows } = await pool.query(
+        `SELECT id, name, email, coaching_phone
+         FROM users WHERE coaching_enabled = TRUE
+         ORDER BY id`
+      );
+      return rows;
     },
   };
 
@@ -1225,6 +1262,25 @@ if (USE_PG) {
         streak_days: streak,
         completion: { last_7d: windowStats(7), last_30d: windowStats(30), last_90d: windowStats(90) },
       };
+    },
+
+    setAssistantPrompt: async (user_id, system_prompt) => {
+      if (!db.coaching_assistant_prompts) db.coaching_assistant_prompts = [];
+      const uid = +user_id;
+      const idx = db.coaching_assistant_prompts.findIndex(p => p.user_id === uid);
+      const row = { user_id: uid, system_prompt, updated_at: nowStr() };
+      if (idx >= 0) db.coaching_assistant_prompts[idx] = row;
+      else db.coaching_assistant_prompts.push(row);
+      persist(db);
+    },
+    getAssistantPrompt: async (user_id) => {
+      if (!db.coaching_assistant_prompts) return null;
+      return db.coaching_assistant_prompts.find(p => p.user_id === +user_id) ?? null;
+    },
+    listEnabledUsers: async () => {
+      return db.users
+        .filter(u => u.coaching_enabled)
+        .map(u => ({ id: u.id, name: u.name, email: u.email, coaching_phone: u.coaching_phone }));
     },
   };
 
