@@ -571,26 +571,6 @@ body {
   color: var(--green) !important;
 }
 
-/* Vote button */
-.vote-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text2);
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.vote-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-.vote-btn.voted { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-.vote-btn svg { width: 12px; height: 12px; }
-
 /* ── Filter Tabs ──────────────────────────────────────────────────── */
 .filter-tabs {
   display: flex;
@@ -1116,11 +1096,11 @@ textarea { resize: vertical; min-height: 72px; }
 
 /* ── To-Dos list view rows ────────────────────────────────────────── */
 .issues-table-header {
-  grid-template-columns: minmax(0,1fr) 160px 110px 90px 110px 60px 140px;
+  grid-template-columns: minmax(0,1fr) 160px 110px 90px 110px 140px;
 }
 .issues-table-header.table-header { display: grid; }
 .issue-table-row {
-  grid-template-columns: minmax(0,1fr) 160px 110px 90px 110px 60px 140px;
+  grid-template-columns: minmax(0,1fr) 160px 110px 90px 110px 140px;
   gap: 12px;
 }
 .issue-title-cell {
@@ -1151,7 +1131,6 @@ textarea { resize: vertical; min-height: 72px; }
   min-width: 0;
 }
 .issue-row-due { font-size: 12px; }
-.issue-row-votes { display: flex; align-items: center; }
 .issue-table-row.solved .issue-row-title { color: var(--text2); text-decoration: line-through; }
 .issue-table-row.archived { opacity: 0.6; }
 

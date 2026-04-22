@@ -4,7 +4,6 @@ const state = {
   users: [],
   rocks: [],
   issues: [],
-  userVotes: [],
   currentView: 'my90',
   my90Rocks: [],
   my90Issues: [],
@@ -415,10 +414,7 @@ qs('#save-rock-btn').addEventListener('click', async () => {
 async function loadIssues() {
   // Always fetch the full visible set (including archived) so the stats bar
   // stays stable regardless of client-side status/owner filters.
-  [state.issues, state.userVotes] = await Promise.all([
-    api.get('/api/issues?include_archived=1'),
-    state.currentUser ? api.get(`/api/issues/votes/${state.currentUser.id}`) : Promise.resolve([]),
-  ]);
+  state.issues = await api.get('/api/issues?include_archived=1');
   renderIssues();
 }
 
@@ -434,8 +430,6 @@ function buildIssueCard(issue) {
     card.style.cursor = 'pointer';
     card.addEventListener('click', () => openIssueModal(issue.id));
   }
-
-  const voted = state.userVotes.includes(issue.id);
 
   // Due date chip
   const due = formatDueDate(issue.due_date);
@@ -513,10 +507,6 @@ function buildIssueCard(issue) {
         <span class="badge badge-${issue.priority}">${issue.priority}</span>
       </div>
       <div class="issue-actions">
-        ${!isArchived ? `<button class="vote-btn ${voted ? 'voted' : ''}" data-id="${issue.id}" title="${voted ? 'Remove vote' : 'Vote to prioritize'}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-          ${issue.votes}
-        </button>` : ''}
         ${solveBtn}
         ${privateBtn}
         ${archiveBtn}
@@ -547,7 +537,6 @@ function buildIssueRow(issue) {
   const isSolved   = issue.status === 'solved';
   const isPrivate  = !!issue.private;
   const isOwner    = !!(state.currentUser && issue.owner_id === state.currentUser.id);
-  const voted      = state.userVotes.includes(issue.id);
   const due        = formatDueDate(issue.due_date);
   const statusLabel = issueStatusLabel(issue.status);
 
@@ -571,12 +560,6 @@ function buildIssueRow(issue) {
     <div class="issue-row-due">${due ? `<span class="due-date-chip due-${due.urgency}">${due.text}</span>` : '<span style="color:var(--text2)">—</span>'}</div>
     <div><span class="badge badge-${issue.priority}">${issue.priority}</span></div>
     <div><span class="badge badge-${issue.status}">${statusLabel}</span></div>
-    <div class="issue-row-votes">
-      ${!isArchived ? `<button class="vote-btn ${voted ? 'voted' : ''}" data-id="${issue.id}" title="${voted ? 'Remove vote' : 'Vote to prioritize'}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-        ${issue.votes}
-      </button>` : `<span style="color:var(--text2);font-size:13px">${issue.votes}</span>`}
-    </div>
     <div class="row-actions">
       ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-issue-btn" data-id="${issue.id}" title="Mark as Solved">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -724,20 +707,6 @@ function renderIssues() {
   }
 
   // ── Events ────────────────────────────────────────────────────────
-  qsa('.vote-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (!state.currentUser) return;
-      const updated = await api.post(`/api/issues/${btn.dataset.id}/vote`, { user_id: state.currentUser.id });
-      const idx = state.issues.findIndex(i => i.id === updated.id);
-      if (idx >= 0) state.issues[idx] = updated;
-      const vIdx = state.userVotes.indexOf(updated.id);
-      if (vIdx >= 0) state.userVotes.splice(vIdx, 1);
-      else state.userVotes.push(updated.id);
-      renderIssues();
-    });
-  });
-
   qsa('.delete-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();

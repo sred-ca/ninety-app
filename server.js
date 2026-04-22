@@ -233,7 +233,6 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
 }));
 
 // ── Issues ───────────────────────────────────────────────────────────────────
-app.get('/api/issues/votes/:userId', wrap(async (req, res) => ok(res, await issueQueries.getUserVotes(req.params.userId))));
 app.get('/api/issues', wrap(async (req, res) => {
   const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
   ok(res, await issueQueries.getAll(req.query.status, req.userId, includeArchived));
@@ -252,10 +251,6 @@ app.put('/api/issues/:id', wrap(async (req, res) => {
 app.delete('/api/issues/:id', wrap(async (req, res) => {
   await issueQueries.delete(req.params.id);
   ok(res, { deleted: true });
-}));
-// Vote always records the signed-in user (H3); ignore any body-supplied user_id.
-app.post('/api/issues/:id/vote', wrap(async (req, res) => {
-  ok(res, await issueQueries.vote(req.params.id, req.userId));
 }));
 
 // ── Team Issues (IDS discussion items) ───────────────────────────────────────

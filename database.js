@@ -158,8 +158,7 @@ if (USE_PG) {
   const ISSUE_Q = `
     SELECT i.id, i.title, i.description, i.owner_id, i.status, i.priority,
            i.archived, i.private, i.due_date, i.created_at, i.updated_at,
-           u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture,
-           (SELECT COUNT(*)::int FROM issue_votes iv WHERE iv.issue_id = i.id) AS votes
+           u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
     FROM issues i LEFT JOIN users u ON i.owner_id = u.id
   `;
 
@@ -230,14 +229,14 @@ if (USE_PG) {
       // Solved tab: return ALL solved (including archived) so frontend can render them separately
       if (status === 'solved') {
         const q = await pool.query(
-          `${ISSUE_Q} WHERE i.status='solved' AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`,
+          `${ISSUE_Q} WHERE i.status='solved' AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, i.created_at DESC`,
           [uid]
         );
         return q.rows;
       }
       const q = status
-        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 ${archCond} AND (NOT i.private OR i.owner_id=$2) ORDER BY i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [status, uid])
-        : await pool.query(`${ISSUE_Q} WHERE 1=1 ${archCond} AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, votes DESC, i.created_at DESC`, [uid]);
+        ? await pool.query(`${ISSUE_Q} WHERE i.status=$1 ${archCond} AND (NOT i.private OR i.owner_id=$2) ORDER BY i.due_date ASC NULLS LAST, i.created_at DESC`, [status, uid])
+        : await pool.query(`${ISSUE_Q} WHERE 1=1 ${archCond} AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, i.created_at DESC`, [uid]);
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
@@ -260,18 +259,6 @@ if (USE_PG) {
       return issueQueries.getById(id);
     },
     delete: async (id) => pool.query('DELETE FROM issues WHERE id=$1', [id]),
-    vote: async (issueId, userId) => {
-      try {
-        await pool.query('INSERT INTO issue_votes (issue_id,user_id) VALUES ($1,$2)', [issueId, userId]);
-      } catch (e) {
-        if (e.code === '23505') {
-          await pool.query('DELETE FROM issue_votes WHERE issue_id=$1 AND user_id=$2', [issueId, userId]);
-        } else throw e;
-      }
-      return issueQueries.getById(issueId);
-    },
-    getUserVotes: async (userId) =>
-      (await pool.query('SELECT issue_id FROM issue_votes WHERE user_id=$1', [userId])).rows.map(r => r.issue_id),
   };
 
   const agendaQueries = {
@@ -570,8 +557,7 @@ if (USE_PG) {
   }
   function enrichIssue(i) {
     const o = i.owner_id ? db.users.find(u => u.id === i.owner_id) : null;
-    const votes = db.issue_votes.filter(v => v.issue_id === i.id).length;
-    return { ...i, archived: !!i.archived, private: !!i.private, due_date: i.due_date || null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, owner_picture: o?.picture ?? null, votes };
+    return { ...i, archived: !!i.archived, private: !!i.private, due_date: i.due_date || null, owner_name: o?.name ?? null, owner_color: o?.color ?? null, owner_picture: o?.picture ?? null };
   }
 
   const p = v => Promise.resolve(v); // wrap sync results as promises
@@ -642,14 +628,14 @@ if (USE_PG) {
         return db.issues
           .filter(i => i.status === 'solved' && visible(i))
           .map(enrichIssue)
-          .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
+          .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.created_at.localeCompare(a.created_at));
       }
       const list = status
         ? db.issues.filter(i => i.status === status && archOk(i) && visible(i))
         : db.issues.filter(i => archOk(i) && visible(i));
       return list
         .map(enrichIssue)
-        .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.votes - a.votes || b.created_at.localeCompare(a.created_at));
+        .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
     create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source }) => {
@@ -667,18 +653,8 @@ if (USE_PG) {
     },
     delete: async (id) => {
       db.issues = db.issues.filter(i => i.id !== +id);
-      db.issue_votes = db.issue_votes.filter(v => v.issue_id !== +id);
       persist(db);
     },
-    vote: async (issueId, userId) => {
-      const idx = db.issue_votes.findIndex(v => v.issue_id === +issueId && v.user_id === +userId);
-      if (idx >= 0) db.issue_votes.splice(idx, 1);
-      else db.issue_votes.push({ issue_id: +issueId, user_id: +userId });
-      persist(db);
-      return issueQueries.getById(issueId);
-    },
-    getUserVotes: async (userId) =>
-      db.issue_votes.filter(v => v.user_id === +userId).map(v => v.issue_id),
   };
 
   if (!db.agendas)       { db.agendas = []; }
