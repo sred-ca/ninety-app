@@ -8,7 +8,6 @@ const state = {
   my90Rocks: [],
   my90Issues: [],
   my90Meetings: [],
-  my90Votes: [],
   quarterFilter: '',
   issueStatusFilter: 'in_progress',
   issueOwnerFilter: [],
@@ -1994,11 +1993,10 @@ async function loadMy90() {
   const in90Str = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
   const uid = state.currentUser?.id;
 
-  const [allRocks, allIssues, allMeetings, votes] = await Promise.all([
+  const [allRocks, allIssues, allMeetings] = await Promise.all([
     api.get('/api/rocks?quarter=' + encodeURIComponent(currentQuarter())),
     api.get('/api/issues'),
     api.get('/api/meetings'),
-    uid ? api.get(`/api/issues/votes/${uid}`) : Promise.resolve([]),
   ]);
 
   state.my90Rocks    = allRocks.filter(r => r.owner_id === uid);
@@ -2008,7 +2006,6 @@ async function loadMy90() {
   state.my90Meetings = allMeetings.filter(m =>
     m.status === 'upcoming' && m.scheduled_at && m.scheduled_at.slice(0, 10) <= in90Str
   );
-  state.my90Votes = votes;
 
   renderMy90();
 }
