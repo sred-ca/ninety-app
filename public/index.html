@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -640,7 +640,24 @@
           <div class="form-group">
             <label>Progress: <span id="progress-label">0%</span></label>
             <input type="range" id="rock-progress" min="0" max="100" value="0" class="range-input" />
+            <div id="rock-progress-note" class="form-help" hidden>Auto-computed from milestones</div>
           </div>
+        </div>
+
+        <div class="milestones-section" id="milestones-section" hidden>
+          <div class="milestones-header">
+            <div class="milestones-header-left">
+              <span class="milestones-title">Milestones</span>
+              <span class="milestones-count" id="milestones-count">0</span>
+            </div>
+          </div>
+          <p class="milestones-hint">Make your Rock timely by breaking it down into achievable Milestones.</p>
+          <div id="milestones-list"></div>
+          <button type="button" class="btn btn-ghost milestones-add" id="add-milestone-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Milestone
+          </button>
+          <p class="milestones-hint milestones-save-first" id="milestones-save-first" hidden>Save the rock first to add milestones.</p>
         </div>
       </div>
       <div class="modal-footer">

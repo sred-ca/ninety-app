@@ -1,7 +1,7 @@
 const express    = require('express');
 const path       = require('path');
 const crypto     = require('crypto');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries } = require('./database');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -229,6 +229,23 @@ app.put('/api/rocks/:id', wrap(async (req, res) => {
 }));
 app.delete('/api/rocks/:id', wrap(async (req, res) => {
   await rockQueries.delete(req.params.id);
+  ok(res, { deleted: true });
+}));
+
+// ── Rock milestones ──────────────────────────────────────────────────────────
+app.get('/api/rocks/:rockId/milestones', wrap(async (req, res) => {
+  ok(res, await milestoneQueries.getByRock(req.params.rockId));
+}));
+app.post('/api/rocks/:rockId/milestones', wrap(async (req, res) => {
+  const { title, due_date, owner_id, sort_order } = req.body;
+  if (!title) return fail(res, 'title is required');
+  ok(res, await milestoneQueries.create(req.params.rockId, { title, due_date, owner_id, sort_order }));
+}));
+app.put('/api/milestones/:id', wrap(async (req, res) => {
+  ok(res, await milestoneQueries.update(req.params.id, req.body));
+}));
+app.delete('/api/milestones/:id', wrap(async (req, res) => {
+  await milestoneQueries.delete(req.params.id);
   ok(res, { deleted: true });
 }));
 

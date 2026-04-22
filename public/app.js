@@ -9,6 +9,8 @@ const state = {
   my90Issues: [],
   my90Meetings: [],
   quarterFilter: '',
+  currentMilestones: [],
+  currentMilestoneRockId: null,
   issueStatusFilter: 'in_progress',
   issueOwnerFilter: [],
   issueVisibilityFilter: 'public',
@@ -307,6 +309,8 @@ function renderRocks() {
 
     // Progress cell
     const pct = rock.progress || 0;
+    const mTotal = rock.milestone_count || 0;
+    const mDone  = rock.milestone_done_count || 0;
     const progressCell = document.createElement('div');
     progressCell.className = 'progress-cell';
     progressCell.innerHTML = `
@@ -314,6 +318,7 @@ function renderRocks() {
         <div class="progress-bar-fill ${rock.status === 'done' ? 'done' : ''}" style="width:${pct}%"></div>
       </div>
       <span class="progress-label-sm">${pct}%</span>
+      ${mTotal > 0 ? `<span class="progress-milestones-sm">${mDone} of ${mTotal}</span>` : ''}
     `;
 
     // Status badge
@@ -363,6 +368,8 @@ function openRockModal(editId) {
   qs('#rock-status').value = rock ? rock.status : 'not_started';
   qs('#rock-progress').value = rock ? rock.progress : 0;
   qs('#progress-label').textContent = `${rock ? rock.progress : 0}%`;
+  qs('#rock-progress').disabled = false;
+  qs('#rock-progress-note').hidden = true;
 
   // Populate owner dropdown
   const ownerSel = qs('#rock-owner');
@@ -375,9 +382,140 @@ function openRockModal(editId) {
   const qSel = qs('#rock-quarter');
   qSel.innerHTML = allQ.map(q => `<option value="${q}" ${rock ? (rock.quarter === q ? 'selected' : '') : (q === (state.quarterFilter || currentQuarter()) ? 'selected' : '')}>${q}</option>`).join('');
 
+  // Milestones section
+  state.currentMilestones = [];
+  state.currentMilestoneRockId = rock ? rock.id : null;
+  qs('#milestones-section').hidden = false;
+  qs('#milestones-list').innerHTML = '';
+  qs('#milestones-count').textContent = '0';
+  if (rock) {
+    qs('#add-milestone-btn').hidden = false;
+    qs('#milestones-save-first').hidden = true;
+    loadAndRenderMilestones(rock.id);
+  } else {
+    qs('#add-milestone-btn').hidden = true;
+    qs('#milestones-save-first').hidden = false;
+  }
+
   openModal('rock-modal');
   qs('#rock-title').focus();
 }
+
+async function loadAndRenderMilestones(rockId) {
+  try {
+    state.currentMilestones = await api.get(`/api/rocks/${rockId}/milestones`);
+  } catch (e) { console.error(e); state.currentMilestones = []; }
+  renderMilestoneList();
+}
+
+function renderMilestoneList() {
+  const list = qs('#milestones-list');
+  list.innerHTML = '';
+  state.currentMilestones.forEach(m => list.appendChild(buildMilestoneRow(m)));
+  qs('#milestones-count').textContent = String(state.currentMilestones.length);
+  updateProgressFromMilestones();
+}
+
+function updateProgressFromMilestones() {
+  const total = state.currentMilestones.length;
+  const slider = qs('#rock-progress');
+  const label  = qs('#progress-label');
+  const note   = qs('#rock-progress-note');
+  if (total === 0) {
+    slider.disabled = false;
+    note.hidden = true;
+    return;
+  }
+  const done = state.currentMilestones.filter(m => m.done).length;
+  const pct  = Math.round((done / total) * 100);
+  slider.value = pct;
+  slider.disabled = true;
+  label.textContent = `${pct}%`;
+  note.hidden = false;
+}
+
+function buildMilestoneRow(m) {
+  const row = document.createElement('div');
+  row.className = `milestone-row ${m.done ? 'done' : ''}`;
+  row.dataset.id = m.id;
+  row.innerHTML = `
+    <button type="button" class="milestone-check ${m.done ? 'done' : ''}" title="Toggle done">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>
+    <input type="text" class="milestone-title-input" value="${esc(m.title)}" />
+    <input type="date" class="milestone-due-input" value="${m.due_date ? m.due_date.slice(0,10) : ''}" />
+    <select class="milestone-owner-select">
+      <option value="">Unassigned</option>
+      ${state.users.map(u => `<option value="${u.id}" ${m.owner_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
+    </select>
+    <button type="button" class="milestone-delete-btn" title="Delete">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+    </button>
+  `;
+
+  row.querySelector('.milestone-check').addEventListener('click', async () => {
+    const newDone = !m.done;
+    try {
+      await api.put(`/api/milestones/${m.id}`, { done: newDone });
+      m.done = newDone;
+      row.classList.toggle('done', newDone);
+      row.querySelector('.milestone-check').classList.toggle('done', newDone);
+      updateProgressFromMilestones();
+      loadRocks(); // refresh list-view progress for the parent rock
+    } catch (e) { alert(e.message); }
+  });
+
+  const titleInput = row.querySelector('.milestone-title-input');
+  titleInput.addEventListener('blur', async () => {
+    const v = titleInput.value.trim();
+    if (!v) { titleInput.value = m.title; return; }
+    if (v === m.title) return;
+    try { await api.put(`/api/milestones/${m.id}`, { title: v }); m.title = v; }
+    catch (e) { alert(e.message); titleInput.value = m.title; }
+  });
+
+  row.querySelector('.milestone-due-input').addEventListener('change', async (e) => {
+    const v = e.target.value || null;
+    try { await api.put(`/api/milestones/${m.id}`, { due_date: v }); m.due_date = v; }
+    catch (err) { alert(err.message); }
+  });
+
+  row.querySelector('.milestone-owner-select').addEventListener('change', async (e) => {
+    const v = e.target.value || null;
+    try { await api.put(`/api/milestones/${m.id}`, { owner_id: v }); m.owner_id = v ? +v : null; }
+    catch (err) { alert(err.message); }
+  });
+
+  row.querySelector('.milestone-delete-btn').addEventListener('click', async () => {
+    try {
+      await api.del(`/api/milestones/${m.id}`);
+      state.currentMilestones = state.currentMilestones.filter(x => x.id !== m.id);
+      renderMilestoneList();
+      loadRocks();
+    } catch (e) { alert(e.message); }
+  });
+
+  return row;
+}
+
+qs('#add-milestone-btn').addEventListener('click', async () => {
+  const rockId = state.currentMilestoneRockId;
+  if (!rockId) return;
+  const rock = state.rocks.find(r => r.id === rockId);
+  try {
+    const m = await api.post(`/api/rocks/${rockId}/milestones`, {
+      title: 'New milestone',
+      owner_id: rock?.owner_id ?? null,
+      sort_order: state.currentMilestones.length,
+    });
+    state.currentMilestones.push(m);
+    renderMilestoneList();
+    loadRocks();
+    const rows = qsa('#milestones-list .milestone-row');
+    const lastInput = rows[rows.length - 1]?.querySelector('.milestone-title-input');
+    if (lastInput) { lastInput.focus(); lastInput.select(); }
+  } catch (e) { alert(e.message); }
+});
 
 // Progress slider live update
 qs('#rock-progress').addEventListener('input', () => {
@@ -392,8 +530,12 @@ qs('#save-rock-btn').addEventListener('click', async () => {
     owner_id: qs('#rock-owner').value || null,
     quarter: qs('#rock-quarter').value,
     status: qs('#rock-status').value,
-    progress: parseInt(qs('#rock-progress').value),
   };
+  // Only send manual progress when there are no milestones — otherwise the
+  // server keeps it in sync with milestone completion automatically.
+  if ((state.currentMilestones || []).length === 0) {
+    body.progress = parseInt(qs('#rock-progress').value);
+  }
   if (!body.title) { qs('#rock-title').focus(); return; }
   try {
     if (id) {

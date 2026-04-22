@@ -44,6 +44,18 @@ if (USE_PG) {
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS rock_milestones (
+        id          SERIAL PRIMARY KEY,
+        rock_id     INTEGER NOT NULL REFERENCES rocks(id) ON DELETE CASCADE,
+        title       TEXT NOT NULL,
+        due_date    DATE,
+        owner_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        done        BOOLEAN NOT NULL DEFAULT FALSE,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS issues (
         id          SERIAL PRIMARY KEY,
         title       TEXT NOT NULL,
@@ -152,7 +164,9 @@ if (USE_PG) {
   }
 
   const ROCK_Q = `
-    SELECT r.*, u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
+    SELECT r.*, u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture,
+           (SELECT COUNT(*)::int FROM rock_milestones m WHERE m.rock_id = r.id) AS milestone_count,
+           (SELECT COUNT(*)::int FROM rock_milestones m WHERE m.rock_id = r.id AND m.done) AS milestone_done_count
     FROM rocks r LEFT JOIN users u ON r.owner_id = u.id
   `;
   const ISSUE_Q = `
@@ -508,7 +522,61 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries };
+  const MILESTONE_Q = `
+    SELECT m.*, u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
+    FROM rock_milestones m LEFT JOIN users u ON m.owner_id = u.id
+  `;
+  // Keep the rock's progress in sync when milestones exist; when the last milestone
+  // is deleted, the stored progress is left alone so manual mode continues to work.
+  async function syncRockProgressFromMilestones(rockId) {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE done)::int AS done_count
+       FROM rock_milestones WHERE rock_id=$1`,
+      [rockId]
+    );
+    const { total, done_count } = rows[0];
+    if (total > 0) {
+      const pct = Math.round((done_count / total) * 100);
+      await pool.query('UPDATE rocks SET progress=$1, updated_at=NOW() WHERE id=$2', [pct, rockId]);
+    }
+  }
+
+  const milestoneQueries = {
+    getByRock: async (rockId) => (await pool.query(
+      `${MILESTONE_Q} WHERE m.rock_id=$1 ORDER BY m.sort_order ASC, m.id ASC`,
+      [rockId]
+    )).rows,
+    getById: async (id) => (await pool.query(`${MILESTONE_Q} WHERE m.id=$1`, [id])).rows[0] ?? null,
+    create: async (rockId, { title, due_date, owner_id, sort_order }) => {
+      const { rows } = await pool.query(
+        'INSERT INTO rock_milestones (rock_id,title,due_date,owner_id,sort_order) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+        [rockId, title, due_date || null, owner_id || null, sort_order ?? 0]
+      );
+      await syncRockProgressFromMilestones(rockId);
+      return milestoneQueries.getById(rows[0].id);
+    },
+    update: async (id, fields) => {
+      const allowed = ['title','due_date','owner_id','done','sort_order'];
+      const keys = allowed.filter(k => k in fields);
+      if (!keys.length) return milestoneQueries.getById(id);
+      const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
+      await pool.query(
+        `UPDATE rock_milestones SET ${sets}, updated_at=NOW() WHERE id=$${keys.length + 1}`,
+        [...keys.map(k => fields[k]), id]
+      );
+      const fresh = await milestoneQueries.getById(id);
+      if (fresh) await syncRockProgressFromMilestones(fresh.rock_id);
+      return fresh;
+    },
+    delete: async (id) => {
+      const m = await milestoneQueries.getById(id);
+      await pool.query('DELETE FROM rock_milestones WHERE id=$1', [id]);
+      if (m) await syncRockProgressFromMilestones(m.rock_id);
+    },
+  };
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries };
 
 } else {
 
@@ -553,7 +621,27 @@ if (USE_PG) {
 
   function enrichRock(r) {
     const o = r.owner_id ? db.users.find(u => u.id === r.owner_id) : null;
-    return { ...r, owner_name: o?.name ?? null, owner_color: o?.color ?? null, owner_picture: o?.picture ?? null };
+    const mList = (db.rock_milestones || []).filter(m => m.rock_id === r.id);
+    return {
+      ...r,
+      owner_name: o?.name ?? null,
+      owner_color: o?.color ?? null,
+      owner_picture: o?.picture ?? null,
+      milestone_count: mList.length,
+      milestone_done_count: mList.filter(m => m.done).length,
+    };
+  }
+
+  function enrichMilestone(m) {
+    const o = m.owner_id ? db.users.find(u => u.id === m.owner_id) : null;
+    return {
+      ...m,
+      done: !!m.done,
+      due_date: m.due_date || null,
+      owner_name: o?.name ?? null,
+      owner_color: o?.color ?? null,
+      owner_picture: o?.picture ?? null,
+    };
   }
   function enrichIssue(i) {
     const o = i.owner_id ? db.users.find(u => u.id === i.owner_id) : null;
@@ -605,7 +693,11 @@ if (USE_PG) {
       if ('owner_id' in fields && fields.owner_id) r.owner_id = +fields.owner_id;
       r.updated_at = nowStr(); persist(db); return enrichRock(r);
     },
-    delete: async (id) => { db.rocks = db.rocks.filter(r => r.id !== +id); persist(db); },
+    delete: async (id) => {
+      db.rocks = db.rocks.filter(r => r.id !== +id);
+      if (db.rock_milestones) db.rock_milestones = db.rock_milestones.filter(m => m.rock_id !== +id);
+      persist(db);
+    },
     quarters: async () => [...new Set(db.rocks.map(r => r.quarter))].sort().reverse(),
   };
 
@@ -661,10 +753,12 @@ if (USE_PG) {
   if (!db.agenda_sections) { db.agenda_sections = []; }
   if (!db.meetings)      { db.meetings = []; }
   if (!db.team_issues)   { db.team_issues = []; }
+  if (!db.rock_milestones) { db.rock_milestones = []; }
   if (!db._seq.agendas)  { db._seq.agendas = 0; }
   if (!db._seq.agenda_sections) { db._seq.agenda_sections = 0; }
   if (!db._seq.meetings) { db._seq.meetings = 0; }
   if (!db._seq.team_issues) { db._seq.team_issues = 0; }
+  if (!db._seq.rock_milestones) { db._seq.rock_milestones = 0; }
   persist(db);
 
   function enrichTeamIssue(ti) {
@@ -880,5 +974,57 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, coachingQueries };
+  function syncRockProgressFromMilestones(rockId) {
+    const list = db.rock_milestones.filter(m => m.rock_id === +rockId);
+    if (list.length === 0) return;
+    const done = list.filter(m => m.done).length;
+    const pct = Math.round((done / list.length) * 100);
+    const rock = db.rocks.find(r => r.id === +rockId);
+    if (rock) { rock.progress = pct; rock.updated_at = nowStr(); }
+  }
+
+  const milestoneQueries = {
+    getByRock: async (rockId) => db.rock_milestones
+      .filter(m => m.rock_id === +rockId)
+      .sort((a,b) => a.sort_order - b.sort_order || a.id - b.id)
+      .map(enrichMilestone),
+    getById: async (id) => {
+      const m = db.rock_milestones.find(m => m.id === +id);
+      return m ? enrichMilestone(m) : null;
+    },
+    create: async (rockId, { title, due_date, owner_id, sort_order }) => {
+      const m = {
+        id: nextId('rock_milestones'),
+        rock_id: +rockId,
+        title,
+        due_date: due_date || null,
+        owner_id: owner_id ? +owner_id : null,
+        done: false,
+        sort_order: sort_order ?? 0,
+        created_at: nowStr(),
+        updated_at: nowStr(),
+      };
+      db.rock_milestones.push(m);
+      syncRockProgressFromMilestones(+rockId);
+      persist(db);
+      return enrichMilestone(m);
+    },
+    update: async (id, fields) => {
+      const m = db.rock_milestones.find(m => m.id === +id); if (!m) return null;
+      ['title','due_date','owner_id','done','sort_order'].forEach(k => { if (k in fields) m[k] = fields[k]; });
+      if ('owner_id' in fields && fields.owner_id) m.owner_id = +fields.owner_id;
+      m.updated_at = nowStr();
+      syncRockProgressFromMilestones(m.rock_id);
+      persist(db);
+      return enrichMilestone(m);
+    },
+    delete: async (id) => {
+      const m = db.rock_milestones.find(m => m.id === +id);
+      db.rock_milestones = db.rock_milestones.filter(m => m.id !== +id);
+      if (m) syncRockProgressFromMilestones(m.rock_id);
+      persist(db);
+    },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries };
 }
