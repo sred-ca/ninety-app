@@ -287,6 +287,37 @@ app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireAdm
   });
 }));
 
+// ── Coaching strategic read endpoints (admin-key auth) ───────────────────────
+// Admin-keyed READ access to the strategic surface — Rocks, Issues (non-
+// private), Team Issues, and Rock milestones. Used by external coaches
+// (e.g. Roy / BusinessCoach) that need the full company view, not just the
+// scoped slice returned by /api/coaching/context. Writes stay cookie-gated
+// below the /api auth line — these endpoints are read-only by design.
+//
+// Private issues are filtered out (uid=0 never matches a real owner), so an
+// admin-keyed caller only sees strategic, non-personal issues.
+app.get('/api/coaching/rocks', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  ok(res, await rockQueries.getAll(req.query.quarter));
+}));
+app.get('/api/coaching/rocks/quarters', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  ok(res, await rockQueries.quarters());
+}));
+app.get('/api/coaching/rocks/:rockId/milestones', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  ok(res, await milestoneQueries.getByRock(req.params.rockId));
+}));
+app.get('/api/coaching/issues', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
+  ok(res, await issueQueries.getAll(req.query.status, 0, includeArchived));
+}));
+app.get('/api/coaching/team-issues', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const includeArchived = req.query.include_archived === '1' || req.query.include_archived === 'true';
+  ok(res, await teamIssueQueries.getAll({
+    horizon: req.query.horizon || undefined,
+    status:  req.query.status  || undefined,
+    includeArchived,
+  }));
+}));
+
 // ── Cron jobs (Vercel Cron; authed via Bearer CRON_SECRET) ───────────────────
 // Registered before the /api cookie gate so Vercel's cron invocation can
 // reach it without a session.
