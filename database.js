@@ -267,7 +267,89 @@ if (USE_PG) {
   }
 
   async function seedVtoAndBudgetIfEmpty() {
-    // V/TO — one row, populated with the FY27 strategic plan content.
+    // V/TO seed content — lifted from SRED.ca's Ninety.io V/TO export
+    // (Leadership Team, Apr 23 2026) with FY27-specific financials carried
+    // forward from the strategic plan. Kept as constants so the first-run
+    // INSERT and the fill-empty UPDATE below share the same values.
+    const CORE_VALUES = [
+      { label: 'Do the Right Thing', description: 'For our team, our partners, and ourselves — no exceptions.' },
+      { label: 'Stay Curious',       description: 'We work with innovators. We have to be one.' },
+    ];
+    const CORE_FOCUS_PURPOSE = "Canada's future depends on its builders. We're in their corner.";
+    const CORE_FOCUS_NICHE   = 'High-technical-footprint CCPCs actively building new products — served through a flat-fee, year-round model that no one else in the industry offers.';
+    const TEN_YEAR_TARGET = [
+      "Position: Canada's most trusted and visible SR&ED brand. Recognized not just for quality, but also for category leadership.",
+      '',
+      'Growth Channels:',
+      '• Acquisitions of smaller SR&ED providers (1–2 per 3 years).',
+      '• Expansion into Eastern Canada and select U.S. markets via partnerships.',
+      '• Internal sales engine driving ~$500K–$1M in new ARR per year.',
+      '',
+      'Client Breakdown:',
+      '• ~75% full-service SR&ED',
+      '• ~25% lite prep or partnership revenue (e.g., white label, accounting firm collabs)',
+      '',
+      'Team Composition:',
+      '• 8 PMs, 5 Sales, CTO, COO, CMO, fractional CFO',
+      '• Senior Ops team running day-to-day',
+      '',
+      'Referral Engine: 50% of new business inbound via partner or client referrals.',
+    ].join('\n');
+    const TEN_YEAR_MEASURABLES = [
+      { label: 'Revenue', value: '$10M' },
+      { label: 'Clients', value: '400' },
+      { label: 'Staff',   value: '40' },
+      { label: 'Profit',  value: '$4.5M' },
+    ];
+    const TARGET_MARKET = [
+      'A) Technology companies with claims between $250K and $2M',
+      '5–50 employees (3–10 SR&ED producers), less than 5 years in business. Buyers: CEOs, CTOs, CFOs, Founders.',
+      '',
+      'B) Technology companies looking for a different provider',
+      '4–200 employees (3–20 SR&ED producers), 3+ years in business. Buyers: CEOs, CTOs, CFOs, Founders.',
+    ].join('\n');
+    const THREE_UNIQUES = [
+      'Guarantee: No SR&ED, No Pay.',
+      'Flat Fee Pricing: Transparent flat-fee pricing at rates below market, with no hidden caps or surprises.',
+      'Year Round Service: Year-round support with quarterly interviews, proactive documentation, and portal access — keeping you always audit-ready.',
+    ];
+    const PROVEN_PROCESS = [
+      '1. Opportunities and SR&ED Assessment — A no-obligation SR&ED Assessment meeting to assess fit, educate prospects, and outline their potential claim opportunity.',
+      '2. Onboarding & Planning — Guided onboarding; align on project scope, set expectations, schedule technical discovery and quarterly interview cadences.',
+      '3. Quarterly SR&ED Tracking — Scheduled interviews and ongoing support document eligible activities and costs in real time. Each quarter, a client-friendly traffic-light report evaluates claim strength, identifies team leads, and estimates accrued SR&ED.',
+      '4. Claim Assembly & Year-End Reporting — At fiscal year-end, consolidate technical narratives and financial summaries, ensuring every eligible dollar is claimed. We manage all timelines, review sessions, and accountant hand-offs.',
+      '5. Audit Readiness & Defense — Meticulous documentation keeps clients audit-ready year-round. If an audit occurs, we handle everything at no extra cost.',
+      '6. Client Feedback & Continuous Improvement — Close the loop with client feedback and post-claim reviews to refine our service. Insights drive product innovation and ensure every client experience gets better over time.',
+    ].join('\n');
+    const GUARANTEE = 'We guarantee that any SR&ED claim we prepare from start to finish will be approved for at least 75% of its filed value. If not, we waive our fee — no questions asked.';
+    const THREE_YEAR_MEASURABLES = [
+      { label: 'Gross Margin', value: '50%' },
+      { label: 'Churn',        value: '≤8%' },
+      { label: 'Clients',      value: '~120' },
+    ];
+    const THREE_YEAR_LOOKS_LIKE = [
+      'Team of 7: Jude (CEO), Logan (CTO/Platform), Evan (Head of Sales), James (PM), Mike (PM/Platform, full-time since late 2026), Toronto-based senior BD/partnerships, Montreal-based bilingual technical writer/analyst.',
+      'Remote-first with Victoria anchor. Toronto coworking presence running Ontario events and CPA/accelerator partnerships. Montreal coworking presence unlocking Quebec credibility and stacking RS&DE + SR&ED claims.',
+      'Product mix: ~90% full-service SR&ED subscription, ~10% SRED.ca Platform as a product line.',
+      'Sales engine: ~50% referrals/partnerships, ~25% AI search/organic content, ~15% events, ~10% paid. Cold email as signal-triggered precision only.',
+      "Brand position: SRED.ca is the default name when someone asks a search engine or LLM 'who should I use for SR&ED in Canada?'",
+    ];
+    const ONE_YEAR_MEASURABLES = [
+      { label: 'Gross Margin',    value: '55%' },
+      { label: 'Churn',           value: '≤8%' },
+      { label: 'MRR by year-end', value: '$40K' },
+      { label: 'New clients',     value: '15–18' },
+    ];
+    const ONE_YEAR_GOALS = [
+      { text: 'Hit $1.5M revenue at $300K operating profit, 55% gross margin, ≤8% churn.', owner_id: null },
+      { text: 'Grow MRR from $20K to $40K, triggering second PM hire. (Evan + Logan)',     owner_id: null },
+      { text: 'Launch SRED.ca Platform to all clients and define FY28 revenue model. (Logan + Mike)', owner_id: null },
+      { text: "Instrument the demand funnel: 'How did you hear about us?' field + HubSpot source taxonomy + Google Ads Enhanced Conversions on Closed-Won.", owner_id: null },
+      { text: 'Build partnership/referral engine to 25% of new business: 5 signed CPA partnerships, 2 signed accelerator/VC partnerships, formalize Easly.', owner_id: null },
+      { text: 'Mike full-time by end of calendar 2026.', owner_id: null },
+    ];
+
+    // Fresh-deploy path: no vto row yet → insert the full doc.
     const vtoCount = (await pool.query('SELECT COUNT(*)::int AS c FROM vto')).rows[0].c;
     if (vtoCount === 0) {
       await pool.query(
@@ -289,47 +371,56 @@ if (USE_PG) {
            $18::jsonb, $19::jsonb
          )`,
         [
-          JSON.stringify([]),
-          '', '',
-          '',
-          JSON.stringify([
-            { label: 'Revenue', value: '$10M' },
-            { label: 'Clients', value: '400' },
-            { label: 'Staff',   value: '40' },
-            { label: 'Profit',  value: '$4.5M' },
-          ]),
-          '',
-          JSON.stringify([]),
-          '', '',
+          JSON.stringify(CORE_VALUES),
+          CORE_FOCUS_PURPOSE, CORE_FOCUS_NICHE,
+          TEN_YEAR_TARGET, JSON.stringify(TEN_YEAR_MEASURABLES),
+          TARGET_MARKET, JSON.stringify(THREE_UNIQUES), PROVEN_PROCESS, GUARANTEE,
           '2028-04-30', '$2.4M', '$600K',
-          JSON.stringify([
-            { label: 'Gross Margin', value: '50%' },
-            { label: 'Churn',        value: '≤8%' },
-            { label: 'Clients',      value: '~120' },
-          ]),
-          JSON.stringify([
-            'Team of 7: Jude (CEO), Logan (CTO/Platform), Evan (Head of Sales), James (PM), Mike (PM/Platform, full-time since late 2026), Toronto-based senior BD/partnerships, Montreal-based bilingual technical writer/analyst.',
-            'Remote-first with Victoria anchor. Toronto coworking presence running Ontario events and CPA/accelerator partnerships. Montreal coworking presence unlocking Quebec credibility and stacking RS&DE + SR&ED claims.',
-            'Product mix: ~90% full-service SR&ED subscription, ~10% SRED.ca Platform as a product line.',
-            'Sales engine: ~50% referrals/partnerships, ~25% AI search/organic content, ~15% events, ~10% paid. Cold email as signal-triggered precision only.',
-            "Brand position: SRED.ca is the default name when someone asks a search engine or LLM 'who should I use for SR&ED in Canada?'",
-          ]),
+          JSON.stringify(THREE_YEAR_MEASURABLES), JSON.stringify(THREE_YEAR_LOOKS_LIKE),
           '2027-04-30', '$1.5M', '$300K operating',
-          JSON.stringify([
-            { label: 'Gross Margin',    value: '55%' },
-            { label: 'Churn',           value: '≤8%' },
-            { label: 'MRR by year-end', value: '$40K' },
-            { label: 'New clients',     value: '15–18' },
-          ]),
-          JSON.stringify([
-            { text: 'Hit $1.5M revenue at $300K operating profit, 55% gross margin, ≤8% churn.', owner_id: null },
-            { text: 'Grow MRR from $20K to $40K, triggering second PM hire. (Evan + Logan)',     owner_id: null },
-            { text: 'Launch SRED.ca Platform to all clients and define FY28 revenue model. (Logan + Mike)', owner_id: null },
-            { text: "Instrument the demand funnel: 'How did you hear about us?' field + HubSpot source taxonomy + Google Ads Enhanced Conversions on Closed-Won.", owner_id: null },
-            { text: 'Build partnership/referral engine to 25% of new business: 5 signed CPA partnerships, 2 signed accelerator/VC partnerships, formalize Easly.', owner_id: null },
-            { text: 'Mike full-time by end of calendar 2026.', owner_id: null },
-          ]),
+          JSON.stringify(ONE_YEAR_MEASURABLES), JSON.stringify(ONE_YEAR_GOALS),
         ]
+      );
+    } else {
+      // Existing-row path (production): the first-run seed already ran when
+      // the user opened the V/TO tab, before we had the Ninety.io export.
+      // Fill ONLY the fields that are still empty — never clobber fields
+      // the user may have edited in the app. All conditions are defensive
+      // (checks both default value and length so 'already edited' content
+      // stays put).
+      await pool.query(
+        `UPDATE vto SET core_values = $1::jsonb
+          WHERE jsonb_array_length(core_values) = 0`,
+        [JSON.stringify(CORE_VALUES)]
+      );
+      await pool.query(
+        `UPDATE vto SET core_focus_purpose = $1 WHERE core_focus_purpose = ''`,
+        [CORE_FOCUS_PURPOSE]
+      );
+      await pool.query(
+        `UPDATE vto SET core_focus_niche = $1 WHERE core_focus_niche = ''`,
+        [CORE_FOCUS_NICHE]
+      );
+      await pool.query(
+        `UPDATE vto SET ten_year_target = $1 WHERE ten_year_target = ''`,
+        [TEN_YEAR_TARGET]
+      );
+      await pool.query(
+        `UPDATE vto SET target_market = $1 WHERE target_market = ''`,
+        [TARGET_MARKET]
+      );
+      await pool.query(
+        `UPDATE vto SET three_uniques = $1::jsonb
+          WHERE jsonb_array_length(three_uniques) = 0`,
+        [JSON.stringify(THREE_UNIQUES)]
+      );
+      await pool.query(
+        `UPDATE vto SET proven_process = $1 WHERE proven_process = ''`,
+        [PROVEN_PROCESS]
+      );
+      await pool.query(
+        `UPDATE vto SET guarantee = $1 WHERE guarantee = ''`,
+        [GUARANTEE]
       );
     }
 
