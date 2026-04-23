@@ -985,6 +985,28 @@
     </div>
   </div>
 
+  <!-- ── Map QB Accounts Modal ─────────────────────────────────── -->
+  <!-- Each budget line gets a dropdown of live QB accounts. On save, any
+       line whose mapping changed is PUT /api/budget/lines/:id with its new
+       qb_account_id. After save, the user re-clicks Sync QB to fill actuals. -->
+  <div id="map-qb-modal" class="modal-overlay">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <h3>Map QuickBooks accounts</h3>
+        <button class="modal-close" data-modal="map-qb-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="form-hint" id="map-qb-hint">Pick the QB account that feeds each budget line. Lines with no mapping are skipped on sync.</p>
+        <div id="map-qb-body"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="map-qb-msg" class="form-msg"></span>
+        <button class="btn btn-ghost" data-modal="map-qb-modal">Cancel</button>
+        <button class="btn btn-primary" id="map-qb-save-btn">Save mappings</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
 </body>

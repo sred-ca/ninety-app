@@ -509,6 +509,71 @@ app.post('/api/quickbooks/disconnect', requireOwner, wrap(async (req, res) => {
   ok(res, { disconnected: true });
 }));
 
+// List the QB company's chart of accounts. Used by the mapping UI to populate
+// a dropdown so owners can pick which QB account feeds each budget line.
+app.get('/api/quickbooks/accounts', requireOwner, wrap(async (req, res) => {
+  const conn = await qbConnectionQueries.getActive();
+  if (!conn) return fail(res, 'QuickBooks not connected', 400);
+  ok(res, await qb.fetchAccounts(conn, qbConnectionQueries));
+}));
+
+// Pull the monthly P&L for the given fiscal year and write actuals into
+// budget_cells for every line whose qb_account_id matches. Returns:
+//   synced_cells      — how many cells were written
+//   mapped_accounts   — qb account ids successfully written to a line
+//   unmapped_accounts — qb accounts that appeared in the P&L but have no
+//                       matching budget line (for the mapping UI)
+app.post('/api/quickbooks/sync', requireOwner, wrap(async (req, res) => {
+  const fiscalYear = (req.body && req.body.fiscal_year) || 'FY27';
+  const n = parseInt(String(fiscalYear).replace(/\D/g, ''), 10);
+  if (!Number.isFinite(n)) return fail(res, 'invalid fiscal_year');
+  const startYear = 2000 + n - 1;
+  const startDate = `${startYear}-05-01`;
+  const endDate   = `${startYear + 1}-04-30`;
+
+  const conn = await qbConnectionQueries.getActive();
+  if (!conn) return fail(res, 'QuickBooks not connected', 400);
+
+  const report = await qb.fetchProfitAndLoss(conn, qbConnectionQueries, startDate, endDate);
+  const parsed = qb.parseProfitAndLoss(report);
+
+  const { lines } = await budgetQueries.getAll(fiscalYear);
+  const lineByAccount = new Map();
+  lines.forEach(l => { if (l.qb_account_id) lineByAccount.set(String(l.qb_account_id), l); });
+
+  let synced = 0;
+  const mapped = [];
+  const unmappedMap = new Map(); // accountId → {id, name}
+  for (const row of parsed.accountRows) {
+    const line = lineByAccount.get(row.accountId);
+    if (!line) {
+      unmappedMap.set(row.accountId, { id: row.accountId, name: row.accountName });
+      continue;
+    }
+    mapped.push({ account_id: row.accountId, line_id: line.id });
+    for (const [period, amount] of Object.entries(row.amounts)) {
+      await budgetQueries.setActual({
+        line_id:       line.id,
+        period_date:   period,
+        actual_amount: amount,
+        source:        'qb',
+      });
+      synced++;
+    }
+  }
+
+  await qbConnectionQueries.markSynced(conn.id);
+  ok(res, {
+    fiscal_year:       fiscalYear,
+    start_date:        startDate,
+    end_date:          endDate,
+    synced_cells:      synced,
+    mapped_accounts:   mapped,
+    unmapped_accounts: [...unmappedMap.values()],
+    last_synced_at:    new Date().toISOString(),
+  });
+}));
+
 // ── V/TO (Vision / Traction Organizer) ───────────────────────────────────────
 // Single-row doc for the whole org. GET always returns a row (created on first
 // call). PUT accepts any subset of V/TO fields — the frontend saves per-section

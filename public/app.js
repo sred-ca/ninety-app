@@ -3624,10 +3624,11 @@ function renderBudgetQbStatus() {
     return;
   }
 
-  // Connected: show Sync button (disabled for now — sync is next chunk)
+  // Connected: Sync button + status + disconnect + map link.
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Sync QB';
-  btn.disabled = true;
-  btn.title = 'P&L sync not yet wired — next build chunk';
+  btn.disabled = false;
+  btn.title = 'Pull the monthly P&L from QuickBooks into the Actual row';
+  btn.onclick = () => syncQb();
 
   row.innerHTML = '';
   const label = document.createElement('span');
@@ -3636,6 +3637,13 @@ function renderBudgetQbStatus() {
     ? `last synced ${new Date(s.last_synced_at).toLocaleString()}`
     : 'not yet synced';
   label.textContent = `Connected to QuickBooks (${s.env || 'sandbox'}, realm ${s.realm_id}) — ${when}.`;
+
+  const mapBtn = document.createElement('button');
+  mapBtn.type = 'button';
+  mapBtn.className = 'btn-link';
+  mapBtn.textContent = 'Map accounts';
+  mapBtn.onclick = () => openMapQbModal();
+
   const disc = document.createElement('button');
   disc.type = 'button';
   disc.className = 'btn-link';
@@ -3646,7 +3654,143 @@ function renderBudgetQbStatus() {
     state.qbStatus = await api.get('/api/quickbooks/status');
     renderBudgetQbStatus();
   };
-  row.append(label, disc);
+  row.append(label, mapBtn, disc);
+}
+
+/* ── QB Sync action ──────────────────────────────────────────── */
+async function syncQb() {
+  const btn = qs('#budget-qb-btn');
+  const status = qs('#budget-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  if (status) status.innerHTML = '';
+  try {
+    const result = await api.post('/api/quickbooks/sync', {
+      fiscal_year: state.budgetFiscalYear,
+    });
+    // Reload budget to pull in newly-written actuals
+    await loadBudget();
+    const msg = [];
+    msg.push(`<span class="budget-msg-ok">Synced ${result.synced_cells} cells across ${result.mapped_accounts.length} account${result.mapped_accounts.length === 1 ? '' : 's'}.</span>`);
+    if (result.unmapped_accounts && result.unmapped_accounts.length) {
+      msg.push(` <span class="budget-msg-err">${result.unmapped_accounts.length} QB account${result.unmapped_accounts.length === 1 ? '' : 's'} unmapped.</span>`);
+      msg.push(' <a href="#" id="budget-unmapped-open">Map them →</a>');
+      state.lastUnmappedAccounts = result.unmapped_accounts;
+    } else {
+      state.lastUnmappedAccounts = [];
+    }
+    if (status) {
+      status.innerHTML = msg.join('');
+      const link = qs('#budget-unmapped-open');
+      if (link) link.onclick = (e) => { e.preventDefault(); openMapQbModal(); };
+    }
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="budget-msg-err">Sync failed: ${e.message}</span>`;
+  }
+}
+
+/* ── Map QB Accounts modal ─────────────────────────────────── */
+async function openMapQbModal() {
+  const body = qs('#map-qb-body');
+  const msg  = qs('#map-qb-msg');
+  const hint = qs('#map-qb-hint');
+  if (msg) msg.textContent = '';
+  if (body) body.innerHTML = '<p class="form-hint">Loading QB accounts…</p>';
+  openModal('map-qb-modal');
+
+  try {
+    const [accounts, latestBudget] = await Promise.all([
+      api.get('/api/quickbooks/accounts'),
+      api.get(`/api/budget?fiscal_year=${encodeURIComponent(state.budgetFiscalYear)}`),
+    ]);
+    state.budget = latestBudget || { lines: [], cells: [] };
+
+    // Unmapped QB accounts: any account in the chart of accounts that is NOT
+    // already attached to a budget line. Call out the ones from the most
+    // recent sync response (the ones that actually had P&L data and got
+    // skipped) at the top.
+    const mappedAccountIds = new Set(
+      state.budget.lines.filter(l => l.qb_account_id).map(l => String(l.qb_account_id))
+    );
+    const recentUnmappedIds = new Set((state.lastUnmappedAccounts || []).map(a => String(a.id)));
+    if (hint) {
+      const flagged = recentUnmappedIds.size;
+      hint.textContent = flagged
+        ? `Pick the QB account for each budget line. ${flagged} QB account${flagged === 1 ? '' : 's'} had P&L data on the last sync but no line to feed — those are marked ⚠.`
+        : 'Pick the QB account that feeds each budget line. Lines with no mapping are skipped on sync.';
+    }
+
+    // Group lines by section for readability
+    const bySection = {};
+    BUDGET_SECTION_ORDER.forEach(s => { bySection[s] = []; });
+    state.budget.lines.forEach(l => { (bySection[l.section] || (bySection[l.section] = [])).push(l); });
+
+    const table = document.createElement('div');
+    table.className = 'map-qb-table';
+    const draft = {}; // line_id → selected account_id (or '' for none)
+
+    BUDGET_SECTION_ORDER.forEach(section => {
+      const sectionLines = bySection[section];
+      if (!sectionLines || !sectionLines.length) return;
+      const h = document.createElement('div');
+      h.className = 'map-qb-group-head';
+      h.textContent = BUDGET_SECTION_LABELS[section] || section;
+      table.appendChild(h);
+
+      sectionLines.forEach(line => {
+        const currentId = line.qb_account_id ? String(line.qb_account_id) : '';
+        draft[line.id] = currentId;
+        const row = document.createElement('div');
+        row.className = 'map-qb-row';
+
+        const label = document.createElement('div');
+        label.className = 'map-qb-line-label';
+        label.textContent = line.category;
+        row.appendChild(label);
+
+        const sel = document.createElement('select');
+        sel.className = 'select-input';
+        const opt0 = document.createElement('option');
+        opt0.value = ''; opt0.textContent = '— no mapping —';
+        sel.appendChild(opt0);
+        accounts.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          const warn = recentUnmappedIds.has(a.id) ? ' ⚠' : '';
+          opt.textContent = `${a.name}${warn}${a.type ? ` · ${a.type}` : ''}`;
+          if (currentId === a.id) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        sel.onchange = () => { draft[line.id] = sel.value; };
+        row.appendChild(sel);
+        table.appendChild(row);
+      });
+    });
+    body.innerHTML = '';
+    body.appendChild(table);
+
+    qs('#map-qb-save-btn').onclick = async () => {
+      if (msg) msg.innerHTML = '<span class="form-msg-ok">Saving…</span>';
+      try {
+        // Persist only the lines whose mapping changed.
+        const changed = state.budget.lines.filter(l => {
+          const was = l.qb_account_id ? String(l.qb_account_id) : '';
+          return (draft[l.id] ?? '') !== was;
+        });
+        for (const line of changed) {
+          await api.put(`/api/budget/lines/${line.id}`, {
+            qb_account_id: draft[line.id] || null,
+          });
+        }
+        if (msg) msg.innerHTML = `<span class="form-msg-ok">Saved ${changed.length} mapping${changed.length === 1 ? '' : 's'}.</span>`;
+        closeModal('map-qb-modal');
+        await loadBudget();
+      } catch (e) {
+        if (msg) msg.innerHTML = `<span class="form-msg-err">Save failed: ${e.message}</span>`;
+      }
+    };
+  } catch (e) {
+    if (body) body.innerHTML = `<p class="form-msg-err">Failed to load QB accounts: ${e.message}</p>`;
+  }
 }
 
 function populateBudgetFySelect() {

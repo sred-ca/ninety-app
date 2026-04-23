@@ -141,6 +141,82 @@ async function apiGet(conn, qbConnectionQueries, path, queryParams = {}) {
   return body;
 }
 
+// Chart-of-accounts query. Returned accounts are used both to map budget
+// lines to QB accounts (user picks which QB account feeds each line) and to
+// validate that P&L accountIds resolve to something the user knows about.
+async function fetchAccounts(conn, qbConnectionQueries) {
+  const data = await apiGet(conn, qbConnectionQueries, 'query', {
+    query: 'select Id, Name, AccountType, AccountSubType, Classification from Account where Active = true',
+  });
+  const items = (data.QueryResponse && data.QueryResponse.Account) || [];
+  return items.map(a => ({
+    id:             String(a.Id),
+    name:           a.Name,
+    type:           a.AccountType || null,
+    subtype:        a.AccountSubType || null,
+    classification: a.Classification || null,
+  }));
+}
+
+// Monthly P&L for a date range. summarize_column_by=Month returns one
+// column per calendar month spanned by the range. Intuit returns the full
+// nested Section/Summary structure; parseProfitAndLoss flattens it.
+async function fetchProfitAndLoss(conn, qbConnectionQueries, startDate, endDate) {
+  return apiGet(conn, qbConnectionQueries, 'reports/ProfitAndLoss', {
+    start_date:          startDate,
+    end_date:            endDate,
+    summarize_column_by: 'Month',
+    accounting_method:   'Accrual',
+  });
+}
+
+// Flattens the monthly P&L response into an array of leaf-account rows with
+// per-period amounts. Skips the "Total" column and any row without an
+// accountId (which means it was a group header, not a real account).
+//
+// Returns:
+//   {
+//     periods:     [YYYY-MM-DD, ...],                 // first-of-month dates
+//     accountRows: [{ accountId, accountName, amounts: { 'YYYY-MM-DD': number } }]
+//   }
+function parseProfitAndLoss(report) {
+  const cols = (report.Columns && report.Columns.Column) || [];
+  // Build index → period-date map for every month column. Skip col 0 (Account
+  // label) and any column whose ColTitle is "Total".
+  const monthCols = [];
+  cols.forEach((col, i) => {
+    if (i === 0) return;
+    if (col.ColTitle && col.ColTitle.toLowerCase() === 'total') return;
+    const meta = (col.MetaData || []).find(m => m.Name === 'StartDate');
+    if (meta && meta.Value) monthCols.push({ index: i, period: String(meta.Value).slice(0, 10) });
+  });
+
+  const accountRows = [];
+  function walk(rows) {
+    if (!rows) return;
+    (rows.Row || []).forEach(row => {
+      if (row.type === 'Data' && Array.isArray(row.ColData)) {
+        const label = row.ColData[0] || {};
+        const accountId   = label.id ? String(label.id) : null;
+        const accountName = label.value ? String(label.value) : '';
+        // Skip synthetic rows without an account id (rare — but safer).
+        if (!accountId) { if (row.Rows) walk(row.Rows); return; }
+        const amounts = {};
+        monthCols.forEach(mc => {
+          const cell = row.ColData[mc.index];
+          const raw  = cell && cell.value != null ? cell.value : '';
+          const num  = Number(String(raw).replace(/,/g, ''));
+          amounts[mc.period] = Number.isFinite(num) ? num : 0;
+        });
+        accountRows.push({ accountId, accountName, amounts });
+      }
+      if (row.Rows) walk(row.Rows);
+    });
+  }
+  walk(report.Rows);
+  return { periods: monthCols.map(mc => mc.period), accountRows };
+}
+
 module.exports = {
   ENV,
   REDIRECT_URI,
@@ -151,4 +227,7 @@ module.exports = {
   refreshAccessToken,
   ensureFreshToken,
   apiGet,
+  fetchAccounts,
+  fetchProfitAndLoss,
+  parseProfitAndLoss,
 };
