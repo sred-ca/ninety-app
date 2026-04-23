@@ -569,6 +569,131 @@ app.get('/api/quickbooks/accounts', requireOwner, wrap(async (req, res) => {
   ok(res, await qb.fetchAccounts(conn, qbConnectionQueries));
 }));
 
+// Best-effort auto-mapping of budget lines to QB accounts. Writes
+// qb_account_id for every confident match; leaves ambiguous or missing
+// lines for the user to resolve manually. The match table is hard-coded
+// from the FY26 P&L account names — fuzzy matching alone would be less
+// predictable here because many budget lines collapse onto a single QB
+// account (e.g., everyone is in "Wages"). Lines that already have a
+// qb_account_id are skipped so owner choices are preserved; re-running
+// is safe.
+app.post('/api/quickbooks/auto-map', requireOwner, wrap(async (req, res) => {
+  const conn = await qbConnectionQueries.getActive();
+  if (!conn) return fail(res, 'QuickBooks not connected', 400);
+  const fiscalYear = (req.body && req.body.fiscal_year) || 'FY27';
+
+  // category (lowercase) → list of keywords; first keyword to match an
+  // account name (case-insensitive substring) wins.
+  const MATCH_RULES = {
+    'full-service new (claim fees)':       ['sales'],
+    'consulting expense':                  ['consulting expense'],
+    'pm payroll (production-related)':     ['wages'],
+    'software service costs (35%)':        ['software service'],
+    'marketing — google ads':              ['advertising'],
+    'marketing — events':                  ['marketing'],
+    'professional fees — legal':           ['legal and professional'],
+    'travel':                              ['travel'],
+    'office & admin':                      ['office expense'],
+    'bank fees & interest':                ['bank charges'],
+    'rent':                                ['rent or lease', 'rent'],
+  };
+  // Lines we deliberately don't auto-map — they'd either clash with
+  // another budget line on the same QB account, or the matching QB
+  // account doesn't exist yet.
+  const AMBIGUOUS = {
+    'full-service renewals':               'QB has a single "Sales" account — add a sub-account or class for renewals.',
+    'mrr subscription':                    'QB has a single "Sales" account — add a sub-account or use "Other income" in QB.',
+    'other income':                        'No matching QB account; add one or leave $0.',
+    'owner market salary (jude + logan)':  'Owner comp is inside "Wages" — split in QB or accept that PM payroll line carries all wages.',
+    'staff — sales (evan)':                "Evan's wages are inside QB 'Wages' — split in QB first.",
+    'staff — pm (james, non-production)':  'James is fully in COGS — line intentionally $0 and unmapped.',
+    'staff — platform (mike, non-prod)':   'Mike is fully in COGS — line intentionally $0 and unmapped.',
+    'marketing — partnerships':            'Shares QB "Marketing" account with Content + Events — split in QB first.',
+    'marketing — content / ai search':     'Shares QB "Marketing" account — split in QB first.',
+    'professional fees — accounting':      'Shares QB "Legal and professional fees" with Legal — split in QB first.',
+    'insurance':                           'No Insurance account in FY26 P&L — add one when you start billing it.',
+    'software — saas tools':               'Shares QB "Software service costs" with Infrastructure — split in QB first.',
+    'software — infrastructure / hosting': 'Shares QB "Software service costs" — split in QB first.',
+    'owner dividend (above-market draw)':  'Maps tentatively to "Wages & earning expenses" — confirm with accountant before mapping.',
+    'bdc line of credit interest':         'Not in FY26 P&L — add an account when the first draw happens.',
+    'bad debt expense':                    "Not an active QB account — add one if the FY25 write-off pattern repeats.",
+  };
+
+  const accounts = await qb.fetchAccounts(conn, qbConnectionQueries);
+  const accountByLower = new Map();
+  accounts.forEach(a => accountByLower.set(String(a.name).toLowerCase(), a));
+  const findByKeyword = (kw) => {
+    const lower = kw.toLowerCase();
+    const exact = accountByLower.get(lower);
+    if (exact) return exact;
+    for (const a of accounts) {
+      if (String(a.name).toLowerCase().includes(lower)) return a;
+    }
+    return null;
+  };
+
+  const { lines } = await budgetQueries.getAll(fiscalYear);
+  const mappedNow     = [];
+  const alreadyMapped = [];
+  const ambiguous     = [];
+  const unmatched     = [];
+  const consumedIds   = new Set();
+
+  for (const line of lines) {
+    const cat = String(line.category).toLowerCase();
+
+    if (line.qb_account_id) {
+      const existing = accounts.find(a => a.id === String(line.qb_account_id));
+      alreadyMapped.push({
+        line_id:         line.id,
+        category:        line.category,
+        qb_account_id:   line.qb_account_id,
+        qb_account_name: existing ? existing.name : null,
+      });
+      if (existing) consumedIds.add(existing.id);
+      continue;
+    }
+
+    const keywords = MATCH_RULES[cat];
+    if (keywords) {
+      let acct = null;
+      for (const kw of keywords) { acct = findByKeyword(kw); if (acct) break; }
+      if (acct) {
+        await budgetQueries.updateLine(line.id, { qb_account_id: acct.id });
+        mappedNow.push({
+          line_id:         line.id,
+          category:        line.category,
+          qb_account_id:   acct.id,
+          qb_account_name: acct.name,
+        });
+        consumedIds.add(acct.id);
+        continue;
+      }
+      unmatched.push({ line_id: line.id, category: line.category });
+      continue;
+    }
+
+    if (AMBIGUOUS[cat]) {
+      ambiguous.push({ line_id: line.id, category: line.category, reason: AMBIGUOUS[cat] });
+      continue;
+    }
+    unmatched.push({ line_id: line.id, category: line.category });
+  }
+
+  const unmatchedQb = accounts
+    .filter(a => !consumedIds.has(a.id))
+    .map(a => ({ id: a.id, name: a.name, type: a.type }));
+
+  ok(res, {
+    fiscal_year:      fiscalYear,
+    mapped_now:       mappedNow,
+    already_mapped:   alreadyMapped,
+    ambiguous_lines:  ambiguous,
+    unmatched_lines:  unmatched,
+    unmatched_qb:     unmatchedQb,
+  });
+}));
+
 // Pull the monthly P&L for the given fiscal year and write actuals into
 // budget_cells for every line whose qb_account_id matches. Returns:
 //   synced_cells      — how many cells were written

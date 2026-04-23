@@ -3804,6 +3804,34 @@ async function openMapQbModal() {
         if (msg) msg.innerHTML = `<span class="form-msg-err">Save failed: ${e.message}</span>`;
       }
     };
+
+    qs('#map-qb-auto-btn').onclick = async () => {
+      const autoBtn = qs('#map-qb-auto-btn');
+      autoBtn.disabled = true;
+      if (msg) msg.innerHTML = '<span class="form-msg-ok">Running auto-map…</span>';
+      try {
+        const result = await api.post('/api/quickbooks/auto-map', {
+          fiscal_year: state.budgetFiscalYear,
+        });
+        // Build a human-readable summary, then reload the modal so the
+        // newly-mapped lines show up in the dropdowns pre-selected.
+        const bits = [];
+        bits.push(`<span class="form-msg-ok">Auto-mapped ${result.mapped_now.length} line${result.mapped_now.length === 1 ? '' : 's'}.</span>`);
+        if (result.ambiguous_lines.length) {
+          bits.push(` <span class="form-msg-err">${result.ambiguous_lines.length} line${result.ambiguous_lines.length === 1 ? '' : 's'} still need your call.</span>`);
+        }
+        if (msg) msg.innerHTML = bits.join('');
+        // Stash the report so the user can inspect it if they want
+        state.lastAutoMapReport = result;
+        console.log('Auto-map report', result);
+        // Re-open modal — refresh dropdowns from the new state
+        await openMapQbModal();
+      } catch (e) {
+        if (msg) msg.innerHTML = `<span class="form-msg-err">Auto-map failed: ${e.message}</span>`;
+      } finally {
+        autoBtn.disabled = false;
+      }
+    };
   } catch (e) {
     if (body) body.innerHTML = `<p class="form-msg-err">Failed to load QB accounts: ${e.message}</p>`;
   }
