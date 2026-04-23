@@ -318,6 +318,17 @@ app.get('/api/coaching/team-issues', requireCoachingFlag, requireAdminKey, wrap(
   }));
 }));
 
+// Admin-keyed read of a user's coaching call timeline. Mirrors the cookie-
+// gated /api/coaching/calls (which scopes to req.userId) but takes the user
+// via the X-Coaching-User-Id header so external coaches (e.g. Roy reading
+// Stella's diary themes) can pull another user's call history.
+app.get('/api/coaching/calls-by-user', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
+  const limit  = Math.min(Math.max(+req.query.limit  || 20, 1), 100);
+  const offset = Math.max(+req.query.offset || 0, 0);
+  ok(res, await coachingQueries.listCalls(userId, limit, offset));
+}));
+
 // ── Cron jobs (Vercel Cron; authed via Bearer CRON_SECRET) ───────────────────
 // Registered before the /api cookie gate so Vercel's cron invocation can
 // reach it without a session.
