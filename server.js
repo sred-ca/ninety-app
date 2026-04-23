@@ -493,6 +493,20 @@ app.put('/api/admin/tab-access/:userId', requireOwner, wrap(async (req, res) => 
   const granted = await tabAccessQueries.set(req.params.userId, tabs);
   ok(res, { user_id: +req.params.userId, tabs: granted });
 }));
+const ROLES = ['owner', 'member'];
+app.put('/api/admin/users/:userId/role', requireOwner, wrap(async (req, res) => {
+  const role = req.body?.role;
+  if (!ROLES.includes(role)) return fail(res, `role must be one of ${ROLES.join(', ')}`);
+  const target = await userQueries.getById(req.params.userId);
+  if (!target) return fail(res, 'user not found', 404);
+  // Guardrail: never allow a change that leaves zero owners.
+  if (role === 'member' && (target.role || 'member') === 'owner') {
+    const owners = await userQueries.countOwners();
+    if (owners <= 1) return fail(res, 'Cannot demote the last owner — promote another user first.');
+  }
+  const updated = await userQueries.setRole(req.params.userId, role);
+  ok(res, { id: updated.id, role: updated.role });
+}));
 
 // ── Budget (owner-only) ─────────────────────────────────────────────────────
 // Three routes: list, upsert budget cell (user edit), and line CRUD. Actuals

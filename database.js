@@ -496,6 +496,12 @@ if (USE_PG) {
     update: async (id, name, color) => (await pool.query(
       'UPDATE users SET name=$1,color=$2 WHERE id=$3 RETURNING *', [name, color, id]
     )).rows[0] ?? null,
+    setRole: async (id, role) => (await pool.query(
+      'UPDATE users SET role=$1 WHERE id=$2 RETURNING *', [role, id]
+    )).rows[0] ?? null,
+    countOwners: async () => (await pool.query(
+      `SELECT COUNT(*)::int AS c FROM users WHERE role='owner'`
+    )).rows[0].c,
     delete: async (id) => pool.query('DELETE FROM users WHERE id=$1', [id]),
     findOrCreateByEmail: async (email, name, picture) => {
       const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];
@@ -1389,6 +1395,11 @@ if (USE_PG) {
       const u = db.users.find(u => u.id === +id); if (!u) return null;
       u.name = name; u.color = color; persist(db); return u;
     },
+    setRole: async (id, role) => {
+      const u = db.users.find(u => u.id === +id); if (!u) return null;
+      u.role = role; persist(db); return u;
+    },
+    countOwners: async () => db.users.filter(u => (u.role || 'member') === 'owner').length,
     delete: async (id) => { db.users = db.users.filter(u => u.id !== +id); persist(db); },
     findOrCreateByEmail: async (email, name, picture) => {
       const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];

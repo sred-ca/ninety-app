@@ -4096,7 +4096,10 @@ function renderAdmin({ assignable_tabs, users }) {
           <span class="admin-cell-user-name">${esc(u.name || '(no name)')}</span>
           <span class="admin-cell-user-email">${esc(u.email || '')}</span>
         </div>
-        <span class="admin-cell-role ${u.role}">${u.role}</span>
+        <select class="admin-role-select ${u.role}" data-user-id="${u.id}" data-prev="${u.role}">
+          <option value="member" ${u.role === 'member' ? 'selected' : ''}>member</option>
+          <option value="owner"  ${u.role === 'owner'  ? 'selected' : ''}>owner</option>
+        </select>
         ${tabCells}
       </div>
     `;
@@ -4126,6 +4129,31 @@ function renderAdmin({ assignable_tabs, users }) {
         cb.checked = !cb.checked; // revert
       } finally {
         cb.disabled = false;
+      }
+    });
+  });
+
+  host.querySelectorAll('select.admin-role-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const userId = sel.dataset.userId;
+      const newRole = sel.value;
+      const prevRole = sel.dataset.prev;
+      sel.disabled = true;
+      try {
+        await api.put(`/api/admin/users/${userId}/role`, { role: newRole });
+        // Role flip changes how the row renders (owner = readonly checkmarks,
+        // member = toggleable checkboxes). Reload the matrix.
+        await loadAdmin();
+        // If self-edit, refresh /api/me so the sidebar (incl. Admin tab) updates.
+        if (state.currentUser && +userId === state.currentUser.id) {
+          const me = await api.get('/api/me');
+          if (me) { state.currentUser = me; applyTabVisibility(me); }
+        }
+      } catch (e) {
+        alert(e.message);
+        sel.value = prevRole; // revert
+      } finally {
+        sel.disabled = false;
       }
     });
   });

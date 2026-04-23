@@ -1047,6 +1047,27 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .admin-cell-role.owner  { background: var(--accent-bg); color: var(--accent); }
 .admin-cell-role.member { background: var(--surface3);  color: var(--text2); }
+.admin-role-select {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 22px 2px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background-color: var(--surface3);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239494b0' stroke-width='3'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  color: var(--text2);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  justify-self: start;
+  transition: border-color 0.12s, background-color 0.12s, color 0.12s;
+}
+.admin-role-select:hover { border-color: var(--accent); }
+.admin-role-select.owner { background-color: var(--accent-bg); color: var(--accent); border-color: transparent; }
+.admin-role-select:disabled { opacity: 0.6; cursor: wait; }
 .admin-tab-cell {
   display: flex;
   justify-content: center;
