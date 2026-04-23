@@ -4022,7 +4022,47 @@ function renderBudgetBody(months) {
 
 function wireBudgetControls() {
   const addBtn = qs('#budget-add-line-btn');
-  addBtn.onclick = () => openBudgetAddLineModal();
+  if (addBtn) addBtn.onclick = () => openBudgetAddLineModal();
+
+  const rebuildBtn = qs('#budget-rebuild-btn');
+  if (rebuildBtn) {
+    // Disable Rebuild when QB isn't connected — it would 400 anyway.
+    const connected = !!(state.qbStatus && state.qbStatus.connected);
+    rebuildBtn.disabled = !connected;
+    rebuildBtn.title = connected
+      ? 'Wipe current budget and rebuild from QuickBooks chart of accounts'
+      : 'Connect QuickBooks first';
+    rebuildBtn.onclick = () => rebuildBudgetFromQb();
+  }
+}
+
+/* Wipe + rebuild the current fiscal year's budget using QB accounts as
+   the category source. Destructive — user confirms first. On success the
+   budget view reloads so the user can see the new QB-aligned grid. */
+async function rebuildBudgetFromQb() {
+  const fy = state.budgetFiscalYear;
+  if (!confirm(
+    `Rebuild ${fy} budget from QuickBooks?\n\n` +
+    `This wipes the current ${fy} budget lines and monthly values, ` +
+    `then recreates one line per active QB account with ${fy} budgets ` +
+    `scaled from the prior-year actuals. Any manual edits to the ` +
+    `current grid will be lost.`
+  )) return;
+
+  const status = qs('#budget-status');
+  if (status) status.innerHTML = '<span class="budget-msg-ok">Rebuilding from QuickBooks… this takes ~10–20s.</span>';
+  try {
+    const result = await api.post('/api/quickbooks/rebuild-budget', { fiscal_year: fy });
+    await loadBudget();
+    const lineCount = result.total_lines || 0;
+    if (status) {
+      status.innerHTML = `<span class="budget-msg-ok">Rebuilt: ${lineCount} line${lineCount === 1 ? '' : 's'} from ${result.chart_of_accounts} active QB accounts. Prior year ${result.prior_start} → ${result.prior_end}.</span>`;
+    }
+    state.lastRebuildReport = result;
+    console.log('Rebuild report', result);
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="budget-msg-err">Rebuild failed: ${e.message}</span>`;
+  }
 }
 
 async function openBudgetAddLineModal() {
