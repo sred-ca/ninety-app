@@ -239,7 +239,6 @@ function applyTabVisibility(user) {
   const isOwner = user?.role === 'owner';
   const show = (tab) => isOwner || grants.has(tab);
   qs('#vto-nav-item')   .style.display = show('vto')    ? '' : 'none';
-  qs('#rocks-nav-item') .style.display = show('rocks')  ? '' : 'none';
   qs('#budget-nav-item').style.display = show('budget') ? '' : 'none';
   qs('#stella-nav-item').style.display = show('stella') ? '' : 'none';
   qs('#admin-nav-item') .style.display = isOwner        ? '' : 'none';

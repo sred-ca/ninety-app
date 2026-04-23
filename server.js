@@ -158,7 +158,8 @@ app.get('/auth/google/callback', async (req, res) => {
 
 // Which sidebar tabs are not default-on for members and can be granted by
 // owners via the Admin view. Must match the list the frontend renders.
-const ASSIGNABLE_TABS = ['vto', 'rocks', 'budget', 'stella'];
+// Rocks is a default tab (everyone sees it); it's not assignable.
+const ASSIGNABLE_TABS = ['vto', 'budget', 'stella'];
 
 // Who am I? Includes role so the frontend can gate owner-only UI, plus the
 // set of assignable tabs this user can see (owners implicitly get all).
