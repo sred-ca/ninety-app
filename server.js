@@ -1,7 +1,8 @@
 const express    = require('express');
 const path       = require('path');
 const crypto     = require('crypto');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries } = require('./database');
+const qb = require('./qb');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -51,6 +52,20 @@ function requireAuth(req, res, next) {
   if (!auth || !auth.userId) return fail(res, 'not authenticated', 401);
   req.userId = auth.userId;
   next();
+}
+
+// Gate routes behind the 'owner' role. Runs after requireAuth — looks up the
+// user fresh each call so role changes take effect without re-login.
+function requireOwner(req, res, next) {
+  (async () => {
+    try {
+      await dbReady;
+      const u = await userQueries.getById(req.userId);
+      if (!u || u.role !== 'owner') return fail(res, 'forbidden', 403);
+      req.userRole = u.role;
+      next();
+    } catch (e) { console.error(e); fail(res, e.message, 500); }
+  })();
 }
 
 // Tiny value whitelist helper used by route handlers to reject unknown enum
@@ -141,18 +156,95 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 });
 
-// Who am I?
+// Who am I? Includes role so the frontend can gate owner-only UI.
 app.get('/api/me', wrap(async (req, res) => {
   const auth = readAuthCookie(req);
   if (!auth) return ok(res, null);
   const user = await userQueries.getById(auth.userId);
-  ok(res, user || null);
+  if (!user) return ok(res, null);
+  ok(res, { ...user, role: user.role || 'member' });
 }));
 
 // Logout
 app.get('/auth/logout', (req, res) => {
   res.clearCookie(COOKIE_NAME);
   res.redirect('/');
+});
+
+// ── QuickBooks OAuth 2.0 ─────────────────────────────────────────────────────
+// Intuit redirects back with ?code=...&state=...&realmId=... Code is
+// exchanged for access + refresh tokens (server-to-server, client_secret
+// required), which are stored keyed by realmId. Stateless CSRF check: we
+// sign the state value as a short-lived cookie; callback verifies it matches.
+const QB_STATE_COOKIE = 'qb_oauth_state';
+
+app.get('/auth/quickbooks', (req, res) => {
+  // Only owners can connect QB — signed-in user must be an owner.
+  const auth = readAuthCookie(req);
+  if (!auth || !auth.userId) return res.redirect('/');
+  (async () => {
+    try {
+      await dbReady;
+      const u = await userQueries.getById(auth.userId);
+      if (!u || u.role !== 'owner') return res.redirect('/?error=qb_forbidden');
+      if (!qb.configured()) return res.redirect('/?error=qb_not_configured');
+      const state = qb.makeState();
+      res.cookie(QB_STATE_COOKIE, state, {
+        httpOnly: true,
+        secure:   !!process.env.VERCEL,
+        sameSite: 'lax',
+        maxAge:   10 * 60 * 1000, // 10 min
+      });
+      res.redirect(qb.getAuthUrl(state));
+    } catch (e) {
+      console.error('QB connect failed:', e);
+      res.redirect('/?error=qb_server_error');
+    }
+  })();
+});
+
+app.get('/auth/quickbooks/callback', (req, res) => {
+  const { code, state, realmId, error } = req.query;
+  if (error)                   return res.redirect('/?error=qb_denied');
+  if (!code || !state || !realmId) return res.redirect('/?error=qb_missing_params');
+
+  // CSRF check
+  const raw = req.headers.cookie || '';
+  const match = raw.match(/(?:^|;)\s*qb_oauth_state=([^;]+)/);
+  const cookieState = match ? decodeURIComponent(match[1]) : null;
+  if (!cookieState || cookieState !== state) return res.redirect('/?error=qb_state_mismatch');
+  res.clearCookie(QB_STATE_COOKIE);
+
+  // Must be an owner (checked again — the connect-start already enforced it,
+  // but someone could land on the callback via a stale session).
+  const auth = readAuthCookie(req);
+  if (!auth || !auth.userId) return res.redirect('/?error=qb_no_session');
+
+  (async () => {
+    try {
+      await dbReady;
+      const u = await userQueries.getById(auth.userId);
+      if (!u || u.role !== 'owner') return res.redirect('/?error=qb_forbidden');
+
+      const tokens = await qb.exchangeCode(code);
+      const accessExpiresAt = new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString();
+      const refreshExpiresAt = tokens.x_refresh_token_expires_in
+        ? new Date(Date.now() + tokens.x_refresh_token_expires_in * 1000).toISOString()
+        : null;
+      await qbConnectionQueries.upsert({
+        realm_id:                 String(realmId),
+        access_token:             tokens.access_token,
+        refresh_token:            tokens.refresh_token,
+        access_token_expires_at:  accessExpiresAt,
+        refresh_token_expires_at: refreshExpiresAt,
+        connected_by_user_id:     auth.userId,
+      });
+      res.redirect('/?qb=connected');
+    } catch (e) {
+      console.error('QB callback failed:', e);
+      res.redirect('/?error=qb_token_exchange');
+    }
+  })();
 });
 
 // ── Coaching integration (Stella) ────────────────────────────────────────────
@@ -363,6 +455,66 @@ app.delete('/api/users/:id', wrap(async (req, res) => {
   await userQueries.delete(req.params.id);
   ok(res, { deleted: true });
 }));
+
+// ── Budget (owner-only) ─────────────────────────────────────────────────────
+// Three routes: list, upsert budget cell (user edit), and line CRUD. Actuals
+// are not touched here — they come from the QB sync job. All gated by
+// requireOwner so non-owner staff can't read or write the budget.
+const BUDGET_SECTIONS = ['income', 'cogs', 'opex', 'other'];
+app.get('/api/budget', requireOwner, wrap(async (req, res) => {
+  ok(res, await budgetQueries.getAll(req.query.fiscal_year || 'FY27'));
+}));
+app.post('/api/budget/lines', requireOwner, wrap(async (req, res) => {
+  const { fiscal_year, section, category, sort_order, qb_account_id, notes } = req.body || {};
+  if (!fiscal_year) return fail(res, 'fiscal_year is required');
+  if (!category)    return fail(res, 'category is required');
+  if (!allow(section, BUDGET_SECTIONS)) return fail(res, `section must be one of ${BUDGET_SECTIONS.join(', ')}`);
+  ok(res, await budgetQueries.createLine({ fiscal_year, section, category, sort_order, qb_account_id, notes }));
+}));
+app.put('/api/budget/lines/:id', requireOwner, wrap(async (req, res) => {
+  if (!allow(req.body.section, BUDGET_SECTIONS)) return fail(res, `section must be one of ${BUDGET_SECTIONS.join(', ')}`);
+  ok(res, await budgetQueries.updateLine(req.params.id, req.body));
+}));
+app.delete('/api/budget/lines/:id', requireOwner, wrap(async (req, res) => {
+  await budgetQueries.deleteLine(req.params.id);
+  ok(res, { deleted: true });
+}));
+app.put('/api/budget/cells', requireOwner, wrap(async (req, res) => {
+  const { line_id, period_date, budget_amount } = req.body || {};
+  if (!line_id || !period_date) return fail(res, 'line_id and period_date are required');
+  const amt = Number(budget_amount);
+  if (!Number.isFinite(amt)) return fail(res, 'budget_amount must be a number');
+  ok(res, await budgetQueries.upsertCell({ line_id, period_date, budget_amount: amt }));
+}));
+
+// QuickBooks connection status + disconnect (owner-only). Never returns
+// tokens — just the "are we connected" summary the UI needs.
+app.get('/api/quickbooks/status', requireOwner, wrap(async (req, res) => {
+  if (!qb.configured()) {
+    return ok(res, { configured: false, connected: false });
+  }
+  const conn = await qbConnectionQueries.getActive();
+  if (!conn) return ok(res, { configured: true, connected: false, env: qb.ENV });
+  ok(res, {
+    configured:     true,
+    connected:      true,
+    env:            qb.ENV,
+    realm_id:       conn.realm_id,
+    last_synced_at: conn.last_synced_at,
+    connected_at:   conn.created_at,
+  });
+}));
+app.post('/api/quickbooks/disconnect', requireOwner, wrap(async (req, res) => {
+  await qbConnectionQueries.disconnect();
+  ok(res, { disconnected: true });
+}));
+
+// ── V/TO (Vision / Traction Organizer) ───────────────────────────────────────
+// Single-row doc for the whole org. GET always returns a row (created on first
+// call). PUT accepts any subset of V/TO fields — the frontend saves per-section
+// (Core Values, Core Focus, etc.) so updates stay small.
+app.get('/api/vto', wrap(async (req, res) => ok(res, await vtoQueries.getOrCreate())));
+app.put('/api/vto', wrap(async (req, res) => ok(res, await vtoQueries.update(req.body || {}))));
 
 // ── Rocks ────────────────────────────────────────────────────────────────────
 app.get('/api/rocks/quarters', wrap(async (req, res) => ok(res, await rockQueries.quarters())));

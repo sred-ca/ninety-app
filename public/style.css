@@ -2543,3 +2543,210 @@ textarea { resize: vertical; min-height: 72px; }
 .form-msg  { font-size: 13px; margin-top: 8px; min-height: 18px; }
 .form-msg-ok  { color: var(--green); }
 .form-msg-err { color: var(--red); }
+
+/* ── V/TO ─────────────────────────────────────────────────────── */
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+.vto-last-updated { color: var(--text2); font-size: 12px; }
+
+.vto-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .vto-grid { grid-template-columns: 1fr; }
+}
+
+.vto-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.vto-col-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--text2); margin: 0 0 4px 2px;
+}
+
+.vto-section { padding: 18px 20px; }
+.vto-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; gap: 8px;
+}
+.vto-section-head h3 { font-size: 15px; font-weight: 700; color: var(--text); margin: 0; }
+.vto-section-body { display: flex; flex-direction: column; gap: 12px; }
+
+.vto-section-link { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.vto-section-link:hover { border-color: var(--border2); background: var(--surface2); }
+.vto-section-summary { color: var(--text2); font-size: 13px; margin: 0; line-height: 1.5; }
+.vto-link-hint { color: var(--accent); font-size: 12px; font-weight: 600; }
+
+.vto-display-block h4 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--text2); margin: 0 0 6px;
+}
+.vto-display-text { color: var(--text); font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+.vto-empty-field { color: var(--text2); font-size: 13px; font-style: italic; margin: 0; }
+
+.vto-values-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.vto-value-item {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.vto-value-label { font-weight: 600; color: var(--text); font-size: 14px; }
+.vto-value-desc  { color: var(--text2); font-size: 12px; margin-top: 3px; line-height: 1.4; }
+
+.vto-subsection h4 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--text2); margin: 0 0 6px;
+}
+.vto-bullets, .vto-uniques-list, .vto-goals-list {
+  list-style: disc; padding-left: 22px; margin: 0; color: var(--text);
+  font-size: 14px; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;
+}
+.vto-goals-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vto-goal-owner {
+  background: var(--accent-bg); color: var(--accent);
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+}
+
+.vto-measurables, .vto-picture-head {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.vto-measurables h4 {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--text2); margin: 0 0 4px;
+}
+.vto-lv-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; }
+.vto-lv-label { color: var(--text2); font-weight: 500; }
+.vto-lv-value { color: var(--text); font-weight: 600; text-align: right; }
+
+.vto-edit-form { display: flex; flex-direction: column; gap: 14px; }
+.vto-field { display: flex; flex-direction: column; gap: 6px; }
+.vto-field > label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--text2);
+}
+.vto-form-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+
+.vto-dyn-list { display: flex; flex-direction: column; gap: 6px; }
+.vto-dyn-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; }
+.vto-dyn-row > input:only-of-type { grid-column: 1 / span 2; }
+.vto-dyn-main { min-width: 0; }
+.vto-dyn-remove {
+  padding: 4px 10px; font-size: 16px; line-height: 1;
+  color: var(--text2);
+}
+.vto-dyn-remove:hover { color: var(--red); border-color: var(--red); }
+
+/* ── Budget ────────────────────────────────────────────────────── */
+.budget-status { color: var(--text2); font-size: 13px; margin-bottom: 8px; min-height: 18px; }
+.budget-msg-ok  { color: var(--green); }
+.budget-msg-err { color: var(--red); }
+.budget-qb-row {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--text2); font-size: 12px; margin-bottom: 12px;
+  min-height: 18px;
+}
+.budget-qb-label { font-variant-numeric: tabular-nums; }
+.btn-link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; }
+.btn-link:hover { text-decoration: underline; }
+.budget-card { padding: 0; }
+.budget-table-scroll { overflow-x: auto; }
+
+.budget-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 1300px;
+  font-size: 13px;
+}
+
+.budget-table thead th {
+  padding: 10px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--text2);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  position: sticky; top: 0; z-index: 2;
+  white-space: nowrap;
+}
+.budget-th-category { text-align: left !important; min-width: 220px; position: sticky; left: 0; z-index: 3 !important; }
+.budget-th-month { min-width: 96px; }
+.budget-th-total { min-width: 110px; }
+.budget-th-actions { min-width: 44px; }
+
+.budget-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.budget-td-category {
+  min-width: 220px; max-width: 260px;
+  background: var(--surface);
+  position: sticky; left: 0; z-index: 1;
+}
+.budget-td-month { text-align: right; white-space: nowrap; }
+.budget-td-total { text-align: right; font-weight: 700; color: var(--text); white-space: nowrap; }
+.budget-td-actions { text-align: center; }
+
+.budget-line-row:hover .budget-td-category { background: var(--surface2); }
+.budget-line-row:hover td { background: var(--surface2); }
+
+.budget-section-head td {
+  background: var(--surface3);
+  color: var(--text);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.budget-section-head.budget-section-income td  { color: var(--green); }
+.budget-section-head.budget-section-cogs td    { color: var(--yellow); }
+.budget-section-head.budget-section-opex td    { color: var(--accent); }
+.budget-section-head.budget-section-other td   { color: var(--text2); }
+
+.budget-subtotal-row td {
+  background: var(--surface2);
+  font-weight: 600;
+  border-top: 1px solid var(--border2);
+}
+.budget-td-subtotal { color: var(--text); }
+
+.budget-empty { text-align: center; color: var(--text2); font-size: 13px; padding: 40px 20px; }
+
+.budget-category-input {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  padding: 6px 8px !important;
+  width: 100%;
+  color: var(--text) !important;
+  font-weight: 500;
+}
+.budget-category-input:hover, .budget-category-input:focus {
+  background: var(--surface3) !important;
+  border: 1px solid var(--border2) !important;
+}
+
+.budget-cell { display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
+.budget-cell-input {
+  text-align: right !important;
+  padding: 4px 8px !important;
+  font-size: 13px !important;
+  font-variant-numeric: tabular-nums;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  min-height: 0 !important;
+  color: var(--text) !important;
+  width: 100%;
+}
+.budget-cell-input:hover, .budget-cell-input:focus {
+  background: var(--surface2) !important;
+  border: 1px solid var(--border2) !important;
+}
+.budget-cell-actual {
+  text-align: right;
+  font-size: 11px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  padding: 0 8px;
+  min-height: 14px;
+}
+

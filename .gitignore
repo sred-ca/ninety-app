@@ -3,3 +3,5 @@ data.json
 .env
 *.db
 .vercel
+.claude/
+sops-staging/

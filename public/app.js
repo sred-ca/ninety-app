@@ -50,6 +50,12 @@ const state = {
   insightsRocks: [],
   insightsTodos: [],
   insightsMeetings: [],
+  // V/TO
+  vto: null,
+  vtoEditing: null, // section key currently in edit mode, or null
+  // Budget
+  budget: { lines: [], cells: [] },
+  budgetFiscalYear: 'FY27',
 };
 
 /* ── API ─────────────────────────────────────────────────────────── */
@@ -221,6 +227,11 @@ function enterApp(user) {
   api.get('/api/coaching/enabled').then(d => {
     if (d && d.enabled) qs('#stella-nav-item').style.display = '';
   }).catch(() => { /* silent — coaching flag is optional */ });
+  // Owner-only tabs: Budget. role comes from /api/me; member users
+  // never see the Budget button and hitting /api/budget returns 403.
+  if (user && user.role === 'owner') {
+    qs('#budget-nav-item').style.display = '';
+  }
   loadAll();
 }
 
@@ -242,9 +253,11 @@ qsa('.nav-item').forEach(btn => {
     qs(`#view-${view}`).classList.add('active');
     state.currentView = view;
     if (view === 'my90')      loadMy90();
+    if (view === 'vto')       loadVto();
     if (view === 'meetings')  loadMeetings();
     if (view === 'insights')  loadInsights();
     if (view === 'stella')    loadStella();
+    if (view === 'budget')    loadBudget();
   });
 });
 
@@ -2868,6 +2881,981 @@ function formatDateLong(d) {
   return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+/* ── V/TO (Vision / Traction Organizer) ──────────────────────────── */
+/* Single-doc editor. Six vision sections, each with a display mode and
+   an inline edit form. State: state.vto holds the row; state.vtoEditing
+   holds the section key currently in edit mode (null = all in display).
+
+   Data shape coming from /api/vto (single row, always present):
+     core_values           : [{ label, description }]
+     core_focus_purpose    : string
+     core_focus_niche      : string
+     ten_year_target       : string
+     ten_year_measurables  : [{ label, value }]
+     target_market         : string
+     three_uniques         : [string, string, string]  (exactly 3 in practice)
+     proven_process        : string
+     guarantee             : string
+     three_year_*          : future_date (YYYY-MM-DD), revenue, profit,
+                             measurables [{label,value}], looks_like [string]
+     one_year_*            : future_date, revenue, profit,
+                             measurables [{label,value}], goals [{ text, owner_id }]
+*/
+
+const VTO_SECTIONS = [
+  'core_values', 'core_focus', 'ten_year',
+  'marketing_strategy', 'three_year', 'one_year',
+];
+
+async function loadVto() {
+  state.vto = await api.get('/api/vto');
+  state.vtoEditing = null;
+  renderVto();
+}
+
+async function saveVtoSection(patch) {
+  state.vto = await api.put('/api/vto', patch);
+  state.vtoEditing = null;
+  renderVto();
+}
+
+function renderVto() {
+  if (!state.vto) return;
+  // "Last updated" header
+  const u = qs('#vto-last-updated');
+  if (u) {
+    u.textContent = state.vto.updated_at
+      ? `Last updated ${new Date(state.vto.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+      : '';
+  }
+  renderVtoCoreValues();
+  renderVtoCoreFocus();
+  renderVtoTenYear();
+  renderVtoMarketingStrategy();
+  renderVtoThreeYear();
+  renderVtoOneYear();
+  wireVtoEditButtons();
+}
+
+function wireVtoEditButtons() {
+  qsa('#view-vto .vto-edit-btn').forEach(btn => {
+    btn.onclick = () => {
+      const section = btn.dataset.section;
+      state.vtoEditing = state.vtoEditing === section ? null : section;
+      renderVto();
+    };
+  });
+  qsa('#view-vto .vto-section-link').forEach(card => {
+    card.onclick = () => {
+      const target = card.dataset.linkView;
+      const navBtn = qs(`.nav-item[data-view="${target}"]`);
+      if (navBtn) navBtn.click();
+    };
+  });
+}
+
+/* ── Display helpers ───────────────────────────── */
+function emptyText(s) {
+  const el = document.createElement('p');
+  el.className = 'vto-empty-field';
+  el.textContent = s;
+  return el;
+}
+
+function labelValueRow(label, value) {
+  const row = document.createElement('div');
+  row.className = 'vto-lv-row';
+  const l = document.createElement('span'); l.className = 'vto-lv-label'; l.textContent = label;
+  const v = document.createElement('span'); v.className = 'vto-lv-value'; v.textContent = value || '—';
+  row.append(l, v);
+  return row;
+}
+
+function bulletList(items, className) {
+  const ul = document.createElement('ul');
+  ul.className = className || 'vto-bullets';
+  items.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item;
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+/* ── Core Values ───────────────────────────────── */
+function renderVtoCoreValues() {
+  const body = qs('#vto-core-values-body');
+  body.innerHTML = '';
+  const list = state.vto.core_values || [];
+
+  if (state.vtoEditing === 'core_values') {
+    const form = document.createElement('div');
+    form.className = 'vto-edit-form';
+    const listWrap = document.createElement('div'); listWrap.className = 'vto-dyn-list';
+    const draft = list.length ? [...list] : [{ label: '', description: '' }];
+
+    const repaint = () => {
+      listWrap.innerHTML = '';
+      draft.forEach((v, i) => {
+        const row = document.createElement('div'); row.className = 'vto-dyn-row';
+        const label = document.createElement('input');
+        label.type = 'text'; label.placeholder = 'Value (e.g. Integrity)';
+        label.value = v.label || '';
+        label.className = 'input vto-dyn-main';
+        label.oninput = () => { draft[i].label = label.value; };
+        const desc = document.createElement('input');
+        desc.type = 'text'; desc.placeholder = 'Short description (optional)';
+        desc.value = v.description || '';
+        desc.className = 'input';
+        desc.oninput = () => { draft[i].description = desc.value; };
+        const rm = document.createElement('button');
+        rm.type = 'button'; rm.className = 'btn btn-ghost btn-sm vto-dyn-remove';
+        rm.textContent = '×';
+        rm.onclick = () => { draft.splice(i, 1); repaint(); };
+        row.append(label, desc, rm);
+        listWrap.appendChild(row);
+      });
+    };
+    repaint();
+
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
+    add.textContent = '+ Add value';
+    add.onclick = () => { draft.push({ label: '', description: '' }); repaint(); };
+
+    form.append(listWrap, add, vtoFormActions('core_values', () => {
+      const cleaned = draft.map(v => ({
+        label: (v.label || '').trim(),
+        description: (v.description || '').trim(),
+      })).filter(v => v.label);
+      return { core_values: cleaned };
+    }));
+    body.appendChild(form);
+    return;
+  }
+
+  if (!list.length) { body.appendChild(emptyText('No core values yet.')); return; }
+  const wrap = document.createElement('div'); wrap.className = 'vto-values-list';
+  list.forEach(v => {
+    const item = document.createElement('div'); item.className = 'vto-value-item';
+    const label = document.createElement('div'); label.className = 'vto-value-label'; label.textContent = v.label;
+    item.appendChild(label);
+    if (v.description) {
+      const desc = document.createElement('div'); desc.className = 'vto-value-desc'; desc.textContent = v.description;
+      item.appendChild(desc);
+    }
+    wrap.appendChild(item);
+  });
+  body.appendChild(wrap);
+}
+
+/* ── Core Focus ────────────────────────────────── */
+function renderVtoCoreFocus() {
+  const body = qs('#vto-core-focus-body');
+  body.innerHTML = '';
+
+  if (state.vtoEditing === 'core_focus') {
+    const form = document.createElement('div'); form.className = 'vto-edit-form';
+    form.append(
+      vtoTextareaField('Purpose / Cause / Passion', 'core_focus_purpose_input', state.vto.core_focus_purpose, 'Why we exist — the purpose behind the work.'),
+      vtoTextareaField('Our Niche', 'core_focus_niche_input', state.vto.core_focus_niche, 'What we do best. The one thing we will build a company around.'),
+      vtoFormActions('core_focus', () => ({
+        core_focus_purpose: qs('#core_focus_purpose_input').value,
+        core_focus_niche:   qs('#core_focus_niche_input').value,
+      })),
+    );
+    body.appendChild(form);
+    return;
+  }
+
+  body.append(
+    vtoDisplayBlock('Purpose / Cause / Passion', state.vto.core_focus_purpose),
+    vtoDisplayBlock('Our Niche', state.vto.core_focus_niche),
+  );
+}
+
+/* ── 10-Year Target ────────────────────────────── */
+function renderVtoTenYear() {
+  const body = qs('#vto-ten-year-body');
+  body.innerHTML = '';
+
+  if (state.vtoEditing === 'ten_year') {
+    const form = document.createElement('div'); form.className = 'vto-edit-form';
+    form.append(
+      vtoTextareaField('Target', 'ten_year_target_input', state.vto.ten_year_target, 'What does success look like 10 years from now?'),
+      vtoMeasurablesEditor('ten_year_measurables', state.vto.ten_year_measurables || []),
+      vtoFormActions('ten_year', () => ({
+        ten_year_target:      qs('#ten_year_target_input').value,
+        ten_year_measurables: vtoCollectMeasurables('ten_year_measurables'),
+      })),
+    );
+    body.appendChild(form);
+    return;
+  }
+
+  body.append(vtoDisplayBlock(null, state.vto.ten_year_target));
+  const measurables = state.vto.ten_year_measurables || [];
+  if (measurables.length) {
+    const mWrap = document.createElement('div'); mWrap.className = 'vto-measurables';
+    const h = document.createElement('h4'); h.textContent = 'Measurables'; mWrap.appendChild(h);
+    measurables.forEach(m => mWrap.appendChild(labelValueRow(m.label, m.value)));
+    body.appendChild(mWrap);
+  }
+}
+
+/* ── Marketing Strategy ────────────────────────── */
+function renderVtoMarketingStrategy() {
+  const body = qs('#vto-marketing-strategy-body');
+  body.innerHTML = '';
+
+  if (state.vtoEditing === 'marketing_strategy') {
+    const form = document.createElement('div'); form.className = 'vto-edit-form';
+    const uniques = (state.vto.three_uniques && state.vto.three_uniques.length === 3)
+      ? state.vto.three_uniques
+      : [...(state.vto.three_uniques || []), '', '', ''].slice(0, 3);
+
+    form.append(
+      vtoTextareaField('Target Market / "The List"', 'target_market_input', state.vto.target_market, 'Who you sell to — the demographic, psychographic, geographic profile.'),
+      (() => {
+        const wrap = document.createElement('div'); wrap.className = 'vto-field';
+        const lbl = document.createElement('label'); lbl.textContent = 'Three Uniques';
+        wrap.appendChild(lbl);
+        uniques.forEach((u, i) => {
+          const inp = document.createElement('input');
+          inp.type = 'text'; inp.className = 'input';
+          inp.id = `three_unique_input_${i}`;
+          inp.placeholder = `Unique ${i + 1}`;
+          inp.value = u || '';
+          wrap.appendChild(inp);
+        });
+        return wrap;
+      })(),
+      vtoTextareaField('Proven Process', 'proven_process_input', state.vto.proven_process, 'The branded, repeatable way you deliver your product or service.'),
+      vtoTextareaField('Guarantee', 'guarantee_input', state.vto.guarantee, 'What you promise the customer — specific, bold, backed up.'),
+      vtoFormActions('marketing_strategy', () => ({
+        target_market:   qs('#target_market_input').value,
+        three_uniques:   [0, 1, 2].map(i => (qs(`#three_unique_input_${i}`).value || '').trim()).filter(Boolean),
+        proven_process:  qs('#proven_process_input').value,
+        guarantee:       qs('#guarantee_input').value,
+      })),
+    );
+    body.appendChild(form);
+    return;
+  }
+
+  body.append(vtoDisplayBlock('Target Market / "The List"', state.vto.target_market));
+  const uniques = state.vto.three_uniques || [];
+  if (uniques.length) {
+    const wrap = document.createElement('div'); wrap.className = 'vto-subsection';
+    const h = document.createElement('h4'); h.textContent = 'Three Uniques'; wrap.appendChild(h);
+    wrap.appendChild(bulletList(uniques, 'vto-uniques-list'));
+    body.appendChild(wrap);
+  }
+  body.append(
+    vtoDisplayBlock('Proven Process', state.vto.proven_process),
+    vtoDisplayBlock('Guarantee', state.vto.guarantee),
+  );
+}
+
+/* ── 3-Year Picture ────────────────────────────── */
+function renderVtoThreeYear() {
+  const body = qs('#vto-three-year-body');
+  body.innerHTML = '';
+
+  if (state.vtoEditing === 'three_year') {
+    const form = document.createElement('div'); form.className = 'vto-edit-form';
+    form.append(
+      vtoDateField('Future Date', 'three_year_future_date_input', state.vto.three_year_future_date),
+      vtoInputField('Revenue', 'three_year_revenue_input', state.vto.three_year_revenue, 'e.g. $2.4M'),
+      vtoInputField('Profit',  'three_year_profit_input',  state.vto.three_year_profit,  'e.g. $600K'),
+      vtoMeasurablesEditor('three_year_measurables', state.vto.three_year_measurables || []),
+      vtoStringListEditor('three_year_looks_like', state.vto.three_year_looks_like || [], 'What does it look like?', 'Add a bullet'),
+      vtoFormActions('three_year', () => ({
+        three_year_future_date:  qs('#three_year_future_date_input').value || null,
+        three_year_revenue:      qs('#three_year_revenue_input').value,
+        three_year_profit:       qs('#three_year_profit_input').value,
+        three_year_measurables:  vtoCollectMeasurables('three_year_measurables'),
+        three_year_looks_like:   vtoCollectStringList('three_year_looks_like'),
+      })),
+    );
+    body.appendChild(form);
+    return;
+  }
+
+  const head = document.createElement('div'); head.className = 'vto-picture-head';
+  head.appendChild(labelValueRow('Future Date', formatVtoDate(state.vto.three_year_future_date)));
+  head.appendChild(labelValueRow('Revenue',     state.vto.three_year_revenue || '—'));
+  head.appendChild(labelValueRow('Profit',      state.vto.three_year_profit  || '—'));
+  body.appendChild(head);
+
+  const measurables = state.vto.three_year_measurables || [];
+  if (measurables.length) {
+    const mWrap = document.createElement('div'); mWrap.className = 'vto-measurables';
+    const h = document.createElement('h4'); h.textContent = 'Measurables'; mWrap.appendChild(h);
+    measurables.forEach(m => mWrap.appendChild(labelValueRow(m.label, m.value)));
+    body.appendChild(mWrap);
+  }
+  const looks = state.vto.three_year_looks_like || [];
+  if (looks.length) {
+    const lWrap = document.createElement('div'); lWrap.className = 'vto-subsection';
+    const h = document.createElement('h4'); h.textContent = 'What does it look like?'; lWrap.appendChild(h);
+    lWrap.appendChild(bulletList(looks));
+    body.appendChild(lWrap);
+  }
+}
+
+/* ── 1-Year Plan ───────────────────────────────── */
+function renderVtoOneYear() {
+  const body = qs('#vto-one-year-body');
+  body.innerHTML = '';
+
+  if (state.vtoEditing === 'one_year') {
+    const form = document.createElement('div'); form.className = 'vto-edit-form';
+    form.append(
+      vtoDateField('Future Date', 'one_year_future_date_input', state.vto.one_year_future_date),
+      vtoInputField('Revenue', 'one_year_revenue_input', state.vto.one_year_revenue, 'e.g. $1.5M'),
+      vtoInputField('Profit',  'one_year_profit_input',  state.vto.one_year_profit,  'e.g. $300K'),
+      vtoMeasurablesEditor('one_year_measurables', state.vto.one_year_measurables || []),
+      vtoGoalsEditor(state.vto.one_year_goals || []),
+      vtoFormActions('one_year', () => ({
+        one_year_future_date:  qs('#one_year_future_date_input').value || null,
+        one_year_revenue:      qs('#one_year_revenue_input').value,
+        one_year_profit:       qs('#one_year_profit_input').value,
+        one_year_measurables:  vtoCollectMeasurables('one_year_measurables'),
+        one_year_goals:        vtoCollectGoals(),
+      })),
+    );
+    body.appendChild(form);
+    return;
+  }
+
+  const head = document.createElement('div'); head.className = 'vto-picture-head';
+  head.appendChild(labelValueRow('Future Date', formatVtoDate(state.vto.one_year_future_date)));
+  head.appendChild(labelValueRow('Revenue',     state.vto.one_year_revenue || '—'));
+  head.appendChild(labelValueRow('Profit',      state.vto.one_year_profit  || '—'));
+  body.appendChild(head);
+
+  const measurables = state.vto.one_year_measurables || [];
+  if (measurables.length) {
+    const mWrap = document.createElement('div'); mWrap.className = 'vto-measurables';
+    const h = document.createElement('h4'); h.textContent = 'Measurables'; mWrap.appendChild(h);
+    measurables.forEach(m => mWrap.appendChild(labelValueRow(m.label, m.value)));
+    body.appendChild(mWrap);
+  }
+  const goals = state.vto.one_year_goals || [];
+  if (goals.length) {
+    const gWrap = document.createElement('div'); gWrap.className = 'vto-subsection';
+    const h = document.createElement('h4'); h.textContent = 'Goals for the Year'; gWrap.appendChild(h);
+    const ul = document.createElement('ul'); ul.className = 'vto-goals-list';
+    goals.forEach(g => {
+      const li = document.createElement('li');
+      const text = document.createElement('span'); text.textContent = g.text || '';
+      li.appendChild(text);
+      if (g.owner_id) {
+        const owner = state.users.find(u => u.id === +g.owner_id);
+        if (owner) {
+          const tag = document.createElement('span');
+          tag.className = 'vto-goal-owner';
+          tag.textContent = owner.name;
+          li.appendChild(tag);
+        }
+      }
+      ul.appendChild(li);
+    });
+    gWrap.appendChild(ul);
+    body.appendChild(gWrap);
+  }
+}
+
+/* ── Shared form-builder helpers ───────────────── */
+function vtoDisplayBlock(label, text) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-display-block';
+  if (label) {
+    const h = document.createElement('h4'); h.textContent = label; wrap.appendChild(h);
+  }
+  if (text && text.trim()) {
+    const p = document.createElement('p'); p.className = 'vto-display-text';
+    p.textContent = text;
+    wrap.appendChild(p);
+  } else {
+    wrap.appendChild(emptyText('—'));
+  }
+  return wrap;
+}
+
+function vtoTextareaField(label, id, value, placeholder) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.htmlFor = id; l.textContent = label;
+  const t = document.createElement('textarea');
+  t.id = id; t.rows = 3; t.className = 'input';
+  t.value = value || '';
+  if (placeholder) t.placeholder = placeholder;
+  wrap.append(l, t);
+  return wrap;
+}
+
+function vtoInputField(label, id, value, placeholder) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.htmlFor = id; l.textContent = label;
+  const i = document.createElement('input');
+  i.type = 'text'; i.id = id; i.className = 'input';
+  i.value = value || '';
+  if (placeholder) i.placeholder = placeholder;
+  wrap.append(l, i);
+  return wrap;
+}
+
+function vtoDateField(label, id, value) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.htmlFor = id; l.textContent = label;
+  const i = document.createElement('input');
+  i.type = 'date'; i.id = id; i.className = 'input';
+  if (value) i.value = (typeof value === 'string') ? value.slice(0, 10) : '';
+  wrap.append(l, i);
+  return wrap;
+}
+
+function vtoMeasurablesEditor(fieldName, items) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.textContent = 'Measurables';
+  wrap.appendChild(l);
+  const listWrap = document.createElement('div');
+  listWrap.className = 'vto-dyn-list';
+  listWrap.dataset.field = fieldName;
+  const draft = items.length ? items.map(x => ({ ...x })) : [{ label: '', value: '' }];
+
+  const repaint = () => {
+    listWrap.innerHTML = '';
+    draft.forEach((m, i) => {
+      const row = document.createElement('div'); row.className = 'vto-dyn-row';
+      const label = document.createElement('input');
+      label.type = 'text'; label.placeholder = 'Measurable (e.g. Revenue)';
+      label.value = m.label || '';
+      label.className = 'input vto-dyn-main';
+      label.oninput = () => { draft[i].label = label.value; };
+      const value = document.createElement('input');
+      value.type = 'text'; value.placeholder = 'Target (e.g. $2.4M)';
+      value.value = m.value || '';
+      value.className = 'input';
+      value.oninput = () => { draft[i].value = value.value; };
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'btn btn-ghost btn-sm vto-dyn-remove';
+      rm.textContent = '×';
+      rm.onclick = () => { draft.splice(i, 1); repaint(); };
+      row.append(label, value, rm);
+      listWrap.appendChild(row);
+    });
+  };
+  repaint();
+  listWrap._draft = draft;
+
+  const add = document.createElement('button');
+  add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
+  add.textContent = '+ Add measurable';
+  add.onclick = () => { draft.push({ label: '', value: '' }); repaint(); };
+
+  wrap.append(listWrap, add);
+  return wrap;
+}
+function vtoCollectMeasurables(fieldName) {
+  const listWrap = qs(`.vto-dyn-list[data-field="${fieldName}"]`);
+  if (!listWrap || !listWrap._draft) return [];
+  return listWrap._draft
+    .map(m => ({ label: (m.label || '').trim(), value: (m.value || '').trim() }))
+    .filter(m => m.label || m.value);
+}
+
+function vtoStringListEditor(fieldName, items, label, placeholder) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.textContent = label;
+  wrap.appendChild(l);
+  const listWrap = document.createElement('div');
+  listWrap.className = 'vto-dyn-list';
+  listWrap.dataset.field = fieldName;
+  const draft = items.length ? [...items] : [''];
+
+  const repaint = () => {
+    listWrap.innerHTML = '';
+    draft.forEach((s, i) => {
+      const row = document.createElement('div'); row.className = 'vto-dyn-row';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.placeholder = placeholder;
+      inp.value = s || '';
+      inp.className = 'input vto-dyn-main';
+      inp.oninput = () => { draft[i] = inp.value; };
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'btn btn-ghost btn-sm vto-dyn-remove';
+      rm.textContent = '×';
+      rm.onclick = () => { draft.splice(i, 1); repaint(); };
+      row.append(inp, rm);
+      listWrap.appendChild(row);
+    });
+  };
+  repaint();
+  listWrap._draft = draft;
+
+  const add = document.createElement('button');
+  add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
+  add.textContent = '+ Add';
+  add.onclick = () => { draft.push(''); repaint(); };
+
+  wrap.append(listWrap, add);
+  return wrap;
+}
+function vtoCollectStringList(fieldName) {
+  const listWrap = qs(`.vto-dyn-list[data-field="${fieldName}"]`);
+  if (!listWrap || !listWrap._draft) return [];
+  return listWrap._draft.map(s => (s || '').trim()).filter(Boolean);
+}
+
+function vtoGoalsEditor(goals) {
+  const wrap = document.createElement('div'); wrap.className = 'vto-field';
+  const l = document.createElement('label'); l.textContent = 'Goals for the Year';
+  wrap.appendChild(l);
+  const listWrap = document.createElement('div');
+  listWrap.className = 'vto-dyn-list';
+  listWrap.dataset.field = 'one_year_goals';
+  const draft = goals.length ? goals.map(g => ({ text: g.text || '', owner_id: g.owner_id || null })) : [{ text: '', owner_id: null }];
+
+  const repaint = () => {
+    listWrap.innerHTML = '';
+    draft.forEach((g, i) => {
+      const row = document.createElement('div'); row.className = 'vto-dyn-row';
+      const text = document.createElement('input');
+      text.type = 'text'; text.placeholder = 'Goal for the year';
+      text.value = g.text || '';
+      text.className = 'input vto-dyn-main';
+      text.oninput = () => { draft[i].text = text.value; };
+      const owner = document.createElement('select');
+      owner.className = 'input';
+      const opt0 = document.createElement('option'); opt0.value = ''; opt0.textContent = '— Owner —';
+      owner.appendChild(opt0);
+      state.users.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.id; opt.textContent = u.name;
+        if (g.owner_id && +g.owner_id === u.id) opt.selected = true;
+        owner.appendChild(opt);
+      });
+      owner.onchange = () => { draft[i].owner_id = owner.value ? +owner.value : null; };
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'btn btn-ghost btn-sm vto-dyn-remove';
+      rm.textContent = '×';
+      rm.onclick = () => { draft.splice(i, 1); repaint(); };
+      row.append(text, owner, rm);
+      listWrap.appendChild(row);
+    });
+  };
+  repaint();
+  listWrap._draft = draft;
+
+  const add = document.createElement('button');
+  add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
+  add.textContent = '+ Add goal';
+  add.onclick = () => { draft.push({ text: '', owner_id: null }); repaint(); };
+
+  wrap.append(listWrap, add);
+  return wrap;
+}
+function vtoCollectGoals() {
+  const listWrap = qs('.vto-dyn-list[data-field="one_year_goals"]');
+  if (!listWrap || !listWrap._draft) return [];
+  return listWrap._draft
+    .map(g => ({ text: (g.text || '').trim(), owner_id: g.owner_id ? +g.owner_id : null }))
+    .filter(g => g.text);
+}
+
+function vtoFormActions(section, buildPatch) {
+  const actions = document.createElement('div'); actions.className = 'vto-form-actions';
+  const save = document.createElement('button');
+  save.type = 'button'; save.className = 'btn btn-primary btn-sm';
+  save.textContent = 'Save';
+  save.onclick = async () => {
+    save.disabled = true;
+    try { await saveVtoSection(buildPatch()); }
+    catch (e) { alert('Save failed: ' + e.message); save.disabled = false; }
+  };
+  const cancel = document.createElement('button');
+  cancel.type = 'button'; cancel.className = 'btn btn-ghost btn-sm';
+  cancel.textContent = 'Cancel';
+  cancel.onclick = () => { state.vtoEditing = null; renderVto(); };
+  actions.append(save, cancel);
+  return actions;
+}
+
+function formatVtoDate(d) {
+  if (!d) return '—';
+  const s = typeof d === 'string' ? d.slice(0, 10) : '';
+  if (!s) return '—';
+  const [y, m, day] = s.split('-').map(Number);
+  if (!y) return '—';
+  return new Date(y, m - 1, day).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/* ── Budget (owner-only) ─────────────────────────────────────────── */
+/* Monthly grid for a fiscal year. Rows are budget_lines, columns are the 12
+   months + a Total. Each monthly cell renders two values: budget (top,
+   inline-editable) and actual (bottom, read-only, populated by QB sync).
+   Sections (Income / COGS / OpEx / Other) get header rows + subtotal rows. */
+
+const BUDGET_SECTION_LABELS = {
+  income: 'Income',
+  cogs:   'Cost of Goods Sold',
+  opex:   'Operating Expenses',
+  other:  'Other',
+};
+const BUDGET_SECTION_ORDER = ['income', 'cogs', 'opex', 'other'];
+
+function fiscalYearMonths(fy) {
+  // FY27 = May 2026 → April 2027. FY<NN> starts May of (2000 + NN - 1).
+  const n = parseInt(String(fy).replace(/\D/g, ''), 10);
+  if (!Number.isFinite(n)) return [];
+  const startYear = 2000 + n - 1;
+  const months = [];
+  for (let i = 0; i < 12; i++) {
+    const m = (4 + i) % 12;
+    const y = startYear + Math.floor((4 + i) / 12);
+    months.push({
+      year:   y,
+      month0: m,                                               // 0-indexed
+      period: `${y}-${String(m + 1).padStart(2, '0')}-01`,     // ISO first-of-month
+      label:  new Date(y, m, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+    });
+  }
+  return months;
+}
+
+function budgetFiscalYearOptions() {
+  // Offer FY26..FY29 for now. Small, hand-curated — avoids auto-drift.
+  return ['FY26', 'FY27', 'FY28', 'FY29'];
+}
+
+function budgetCellsFor(lineId) {
+  const out = {};
+  state.budget.cells.forEach(c => {
+    if (c.line_id === lineId) out[String(c.period_date).slice(0, 10)] = c;
+  });
+  return out;
+}
+
+function fmtMoney(n) {
+  if (n == null || n === '') return '—';
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  if (num === 0) return '$0';
+  const abs = Math.abs(num);
+  const sign = num < 0 ? '-' : '';
+  if (abs >= 1000) return `${sign}$${abs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  return `${sign}$${abs.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+}
+function parseMoneyInput(str) {
+  if (str == null) return 0;
+  const s = String(str).trim().replace(/[\$,\s]/g, '');
+  if (!s) return 0;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+async function loadBudget() {
+  populateBudgetFySelect();
+  const [data, qbStatus] = await Promise.all([
+    api.get(`/api/budget?fiscal_year=${encodeURIComponent(state.budgetFiscalYear)}`),
+    api.get('/api/quickbooks/status').catch(() => ({ configured: false, connected: false })),
+  ]);
+  state.budget = data || { lines: [], cells: [] };
+  state.qbStatus = qbStatus;
+  renderBudget();
+  renderBudgetQbStatus();
+  maybeFlashQbOauthResult();
+}
+
+// One-shot: if the URL has ?qb=connected or ?error=qb_*, surface a status
+// message in the budget status strip, then strip the param so refreshes
+// don't replay the flash.
+function maybeFlashQbOauthResult() {
+  const params = new URLSearchParams(location.search);
+  const status = qs('#budget-status');
+  if (!status) return;
+  const err = params.get('error');
+  if (params.get('qb') === 'connected') {
+    status.innerHTML = '<span class="budget-msg-ok">QuickBooks connected.</span>';
+  } else if (err && err.startsWith('qb_')) {
+    const msg = ({
+      qb_denied:            'QuickBooks connection cancelled.',
+      qb_forbidden:         'Only owners can connect QuickBooks.',
+      qb_not_configured:    'QuickBooks credentials are not configured on the server.',
+      qb_missing_params:    'QuickBooks callback was missing required parameters.',
+      qb_state_mismatch:    'QuickBooks security check failed — try again.',
+      qb_no_session:        'Session expired during the QuickBooks flow — sign in and retry.',
+      qb_token_exchange:    'QuickBooks token exchange failed. Check app credentials.',
+      qb_server_error:      'Unexpected server error starting the QuickBooks flow.',
+    }[err]) || `QuickBooks error: ${err}`;
+    status.innerHTML = `<span class="budget-msg-err">${msg}</span>`;
+  }
+  if (params.has('qb') || err) {
+    const url = new URL(location.href);
+    url.searchParams.delete('qb');
+    url.searchParams.delete('error');
+    history.replaceState(null, '', url.toString());
+    setTimeout(() => { if (status) status.innerHTML = ''; }, 6000);
+  }
+}
+
+function renderBudgetQbStatus() {
+  const btn = qs('#budget-qb-btn');
+  const row = qs('#budget-qb-row');
+  if (!btn || !row) return;
+  const s = state.qbStatus || { configured: false, connected: false };
+
+  if (!s.configured) {
+    btn.textContent = 'QB not configured';
+    btn.disabled = true;
+    btn.title = 'Add QBO_CLIENT_ID and QBO_CLIENT_SECRET to .env';
+    row.textContent = '';
+    return;
+  }
+
+  if (!s.connected) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Connect QuickBooks';
+    btn.disabled = false;
+    btn.title = `Connect the SRED.ca QuickBooks company (${s.env || 'sandbox'})`;
+    btn.onclick = () => { window.location.href = '/auth/quickbooks'; };
+    row.textContent = '';
+    return;
+  }
+
+  // Connected: show Sync button (disabled for now — sync is next chunk)
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Sync QB';
+  btn.disabled = true;
+  btn.title = 'P&L sync not yet wired — next build chunk';
+
+  row.innerHTML = '';
+  const label = document.createElement('span');
+  label.className = 'budget-qb-label';
+  const when = s.last_synced_at
+    ? `last synced ${new Date(s.last_synced_at).toLocaleString()}`
+    : 'not yet synced';
+  label.textContent = `Connected to QuickBooks (${s.env || 'sandbox'}, realm ${s.realm_id}) — ${when}.`;
+  const disc = document.createElement('button');
+  disc.type = 'button';
+  disc.className = 'btn-link';
+  disc.textContent = 'Disconnect';
+  disc.onclick = async () => {
+    if (!confirm('Disconnect QuickBooks? You can re-connect anytime.')) return;
+    await api.post('/api/quickbooks/disconnect', {});
+    state.qbStatus = await api.get('/api/quickbooks/status');
+    renderBudgetQbStatus();
+  };
+  row.append(label, disc);
+}
+
+function populateBudgetFySelect() {
+  const sel = qs('#budget-fy-select');
+  if (!sel) return;
+  if (!sel.options.length) {
+    budgetFiscalYearOptions().forEach(fy => {
+      const o = document.createElement('option');
+      o.value = fy; o.textContent = fy;
+      sel.appendChild(o);
+    });
+    sel.value = state.budgetFiscalYear;
+    sel.onchange = () => { state.budgetFiscalYear = sel.value; loadBudget(); };
+  } else {
+    sel.value = state.budgetFiscalYear;
+  }
+}
+
+function renderBudget() {
+  const months = fiscalYearMonths(state.budgetFiscalYear);
+  renderBudgetHead(months);
+  renderBudgetBody(months);
+  wireBudgetControls();
+}
+
+function renderBudgetHead(months) {
+  const head = qs('#budget-table-head');
+  head.innerHTML = '';
+  const tr = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.className = 'budget-th-category'; th0.textContent = 'Category';
+  tr.appendChild(th0);
+  months.forEach(m => {
+    const th = document.createElement('th');
+    th.className = 'budget-th-month';
+    th.textContent = m.label;
+    tr.appendChild(th);
+  });
+  const thTotal = document.createElement('th'); thTotal.className = 'budget-th-total'; thTotal.textContent = 'Total';
+  const thActions = document.createElement('th'); thActions.className = 'budget-th-actions';
+  tr.append(thTotal, thActions);
+  head.appendChild(tr);
+}
+
+function renderBudgetBody(months) {
+  const body = qs('#budget-table-body');
+  body.innerHTML = '';
+
+  if (!state.budget.lines.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = months.length + 3;
+    td.className = 'budget-empty';
+    td.textContent = `No budget lines yet for ${state.budgetFiscalYear}. Click "Add line" to start.`;
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
+
+  // Group lines by section
+  const bySection = {};
+  BUDGET_SECTION_ORDER.forEach(s => { bySection[s] = []; });
+  state.budget.lines.forEach(l => {
+    (bySection[l.section] || (bySection[l.section] = [])).push(l);
+  });
+
+  BUDGET_SECTION_ORDER.forEach(section => {
+    const lines = bySection[section];
+    if (!lines || !lines.length) return;
+
+    // Section header row
+    const sh = document.createElement('tr');
+    sh.className = `budget-section-head budget-section-${section}`;
+    const shTd = document.createElement('td');
+    shTd.colSpan = months.length + 3;
+    shTd.textContent = BUDGET_SECTION_LABELS[section] || section;
+    sh.appendChild(shTd);
+    body.appendChild(sh);
+
+    // Line rows
+    lines.forEach(line => {
+      const cellsByPeriod = budgetCellsFor(line.id);
+      const tr = document.createElement('tr');
+      tr.className = 'budget-line-row';
+      tr.dataset.lineId = line.id;
+
+      // Category cell (inline-editable)
+      const nameTd = document.createElement('td'); nameTd.className = 'budget-td-category';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = line.category;
+      nameInput.className = 'budget-category-input';
+      nameInput.onblur = async () => {
+        const v = nameInput.value.trim();
+        if (!v || v === line.category) { nameInput.value = line.category; return; }
+        await api.put(`/api/budget/lines/${line.id}`, { category: v });
+        line.category = v;
+      };
+      nameTd.appendChild(nameInput);
+      tr.appendChild(nameTd);
+
+      // Monthly cells
+      let total = 0;
+      months.forEach(m => {
+        const td = document.createElement('td'); td.className = 'budget-td-month';
+        const cell = cellsByPeriod[m.period] || null;
+        const budgetVal = cell ? Number(cell.budget_amount) : 0;
+        total += budgetVal;
+
+        const wrap = document.createElement('div'); wrap.className = 'budget-cell';
+        const bInput = document.createElement('input');
+        bInput.type = 'text';
+        bInput.className = 'budget-cell-input';
+        bInput.value = budgetVal ? budgetVal.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '';
+        bInput.placeholder = '—';
+        bInput.dataset.lineId = line.id;
+        bInput.dataset.period = m.period;
+        bInput.onblur = async () => {
+          const n = parseMoneyInput(bInput.value);
+          if (!Number.isFinite(n)) { bInput.value = budgetVal ? budgetVal.toLocaleString('en-US', { maximumFractionDigits: 0 }) : ''; return; }
+          if (n === budgetVal) return;
+          const saved = await api.put('/api/budget/cells', { line_id: line.id, period_date: m.period, budget_amount: n });
+          // Update local state to match server
+          const idx = state.budget.cells.findIndex(c => c.id === saved.id);
+          if (idx >= 0) state.budget.cells[idx] = saved; else state.budget.cells.push(saved);
+          renderBudget();
+        };
+        bInput.onkeydown = (e) => { if (e.key === 'Enter') bInput.blur(); };
+
+        const actual = document.createElement('div'); actual.className = 'budget-cell-actual';
+        actual.textContent = (cell && cell.actual_amount != null)
+          ? fmtMoney(cell.actual_amount)
+          : '—';
+        if (cell && cell.actual_source) actual.title = `Actual source: ${cell.actual_source}`;
+
+        wrap.append(bInput, actual);
+        td.appendChild(wrap);
+        tr.appendChild(td);
+      });
+
+      // Total
+      const totalTd = document.createElement('td'); totalTd.className = 'budget-td-total';
+      totalTd.textContent = total ? fmtMoney(total) : '—';
+      tr.appendChild(totalTd);
+
+      // Actions
+      const actTd = document.createElement('td'); actTd.className = 'budget-td-actions';
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'btn btn-ghost btn-sm';
+      del.innerHTML = '×'; del.title = 'Delete line';
+      del.onclick = async () => {
+        if (!confirm(`Delete "${line.category}"? This clears its monthly values.`)) return;
+        await api.del(`/api/budget/lines/${line.id}`);
+        await loadBudget();
+      };
+      actTd.appendChild(del);
+      tr.appendChild(actTd);
+
+      body.appendChild(tr);
+    });
+
+    // Section subtotal row
+    const sub = document.createElement('tr');
+    sub.className = 'budget-subtotal-row';
+    const subName = document.createElement('td'); subName.className = 'budget-td-category'; subName.textContent = `${BUDGET_SECTION_LABELS[section]} subtotal`;
+    sub.appendChild(subName);
+    let secTotal = 0;
+    months.forEach(m => {
+      let monthSum = 0;
+      lines.forEach(l => {
+        const c = state.budget.cells.find(x => x.line_id === l.id && String(x.period_date).slice(0, 10) === m.period);
+        if (c) monthSum += Number(c.budget_amount) || 0;
+      });
+      secTotal += monthSum;
+      const td = document.createElement('td'); td.className = 'budget-td-month budget-td-subtotal';
+      td.textContent = monthSum ? fmtMoney(monthSum) : '—';
+      sub.appendChild(td);
+    });
+    const subTotalTd = document.createElement('td'); subTotalTd.className = 'budget-td-total budget-td-subtotal';
+    subTotalTd.textContent = secTotal ? fmtMoney(secTotal) : '—';
+    sub.appendChild(subTotalTd);
+    sub.appendChild(document.createElement('td'));
+    body.appendChild(sub);
+  });
+}
+
+function wireBudgetControls() {
+  const addBtn = qs('#budget-add-line-btn');
+  addBtn.onclick = () => openBudgetAddLineModal();
+}
+
+async function openBudgetAddLineModal() {
+  // Light-touch prompt-based add. Swap for a proper modal if this gets heavy.
+  const category = prompt('New budget line — category name?');
+  if (!category) return;
+  const sectionRaw = prompt('Section? One of: income, cogs, opex, other', 'opex');
+  const section = (sectionRaw || 'opex').toLowerCase().trim();
+  if (!BUDGET_SECTION_ORDER.includes(section)) { alert('Unknown section.'); return; }
+  try {
+    await api.post('/api/budget/lines', {
+      fiscal_year: state.budgetFiscalYear,
+      section,
+      category: category.trim(),
+      sort_order: state.budget.lines.length,
+    });
+    await loadBudget();
+  } catch (e) {
+    alert('Failed to add line: ' + e.message);
+  }
+}
 
 /* ── Load all ────────────────────────────────────────────────────── */
 async function loadAll() {

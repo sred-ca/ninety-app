@@ -48,6 +48,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           <span>My 90</span>
         </button>
+        <button class="nav-item" data-view="vto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>V/TO</span>
+        </button>
         <button class="nav-item" data-view="rocks">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           <span>Rocks</span>
@@ -67,6 +71,10 @@
         <button class="nav-item" data-view="insights">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           <span>Insights</span>
+        </button>
+        <button class="nav-item" data-view="budget" id="budget-nav-item" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Budget</span>
         </button>
         <button class="nav-item" data-view="stella" id="stella-nav-item" style="display:none">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -97,6 +105,127 @@
           </div>
         </div>
         <div class="my90-grid" id="my90-grid"></div>
+      </section>
+
+      <!-- ── V/TO View ────────────────────────────────── -->
+      <!-- Vision / Traction Organizer. Sections are rendered and edited
+           individually by app.js (loadVto / renderVto). Each card has a
+           display mode and an inline edit mode. -->
+      <section id="view-vto" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>V/TO</h1>
+            <p class="view-subtitle" id="vto-subtitle">Vision / Traction Organizer</p>
+          </div>
+          <div class="view-header-right">
+            <span class="vto-last-updated" id="vto-last-updated"></span>
+          </div>
+        </div>
+
+        <div class="vto-grid">
+          <!-- Vision column -->
+          <div class="vto-col vto-col-vision">
+            <h2 class="vto-col-title">Vision</h2>
+            <div class="vto-section card" data-section="core_values">
+              <div class="vto-section-head">
+                <h3>Core Values</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="core_values">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-core-values-body"></div>
+            </div>
+
+            <div class="vto-section card" data-section="core_focus">
+              <div class="vto-section-head">
+                <h3>Core Focus</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="core_focus">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-core-focus-body"></div>
+            </div>
+
+            <div class="vto-section card" data-section="ten_year">
+              <div class="vto-section-head">
+                <h3>10-Year Target</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="ten_year">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-ten-year-body"></div>
+            </div>
+
+            <div class="vto-section card" data-section="marketing_strategy">
+              <div class="vto-section-head">
+                <h3>Marketing Strategy</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="marketing_strategy">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-marketing-strategy-body"></div>
+            </div>
+
+            <div class="vto-section card" data-section="three_year">
+              <div class="vto-section-head">
+                <h3>3-Year Picture</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="three_year">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-three-year-body"></div>
+            </div>
+
+            <div class="vto-section card" data-section="one_year">
+              <div class="vto-section-head">
+                <h3>1-Year Plan</h3>
+                <button class="btn btn-ghost btn-sm vto-edit-btn" data-section="one_year">Edit</button>
+              </div>
+              <div class="vto-section-body" id="vto-one-year-body"></div>
+            </div>
+          </div>
+
+          <!-- Traction column -->
+          <div class="vto-col vto-col-traction">
+            <h2 class="vto-col-title">Traction</h2>
+            <div class="vto-section card vto-section-link" data-link-view="rocks">
+              <div class="vto-section-head">
+                <h3>Quarterly Rocks</h3>
+                <span class="vto-link-hint">Open →</span>
+              </div>
+              <p class="vto-section-summary">90-day priorities that move you toward your 1-Year Plan. Managed in the Rocks tab.</p>
+            </div>
+            <div class="vto-section card vto-section-link" data-link-view="team-issues">
+              <div class="vto-section-head">
+                <h3>Issues List</h3>
+                <span class="vto-link-hint">Open →</span>
+              </div>
+              <p class="vto-section-summary">Long-term and short-term obstacles to identify, discuss, and solve. Managed in the Issues tab.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Budget View (owner-only) ────────────────── -->
+      <!-- Monthly budget/actual grid. Actuals are populated by the QB sync
+           job; budget cells are inline-editable by owners. Sidebar tab is
+           hidden for non-owner users via role check in app.js (enterApp). -->
+      <section id="view-budget" class="view">
+        <div class="view-header">
+          <div class="view-header-left">
+            <h1>Budget</h1>
+            <p class="view-subtitle" id="budget-subtitle">FY27 monthly budget vs. actuals</p>
+          </div>
+          <div class="view-header-right">
+            <select id="budget-fy-select" class="select-input"></select>
+            <button class="btn btn-ghost btn-sm" id="budget-qb-btn"></button>
+            <button class="btn btn-primary btn-sm" id="budget-add-line-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add line
+            </button>
+          </div>
+        </div>
+
+        <div class="budget-status" id="budget-status"></div>
+        <div class="budget-qb-row" id="budget-qb-row"></div>
+        <div class="card budget-card">
+          <div class="budget-table-scroll">
+            <table class="budget-table" id="budget-table">
+              <thead id="budget-table-head"></thead>
+              <tbody id="budget-table-body"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- ── Rocks View ─────────────────────────────────── -->

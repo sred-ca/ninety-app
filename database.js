@@ -29,6 +29,7 @@ if (USE_PG) {
         email      TEXT UNIQUE,
         color      TEXT NOT NULL DEFAULT '#6366f1',
         picture    TEXT,
+        role       TEXT NOT NULL DEFAULT 'member',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
@@ -145,6 +146,72 @@ if (USE_PG) {
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS qb_connections (
+        id                       SERIAL PRIMARY KEY,
+        realm_id                 TEXT        NOT NULL UNIQUE,
+        access_token             TEXT        NOT NULL,
+        refresh_token            TEXT        NOT NULL,
+        access_token_expires_at  TIMESTAMPTZ NOT NULL,
+        refresh_token_expires_at TIMESTAMPTZ,
+        connected_by_user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        last_synced_at           TIMESTAMPTZ,
+        created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS budget_lines (
+        id            SERIAL PRIMARY KEY,
+        fiscal_year   TEXT        NOT NULL,
+        section       TEXT        NOT NULL DEFAULT 'opex',
+        category      TEXT        NOT NULL,
+        sort_order    INTEGER     NOT NULL DEFAULT 0,
+        qb_account_id TEXT,
+        notes         TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS budget_cells (
+        id               SERIAL PRIMARY KEY,
+        line_id          INTEGER NOT NULL REFERENCES budget_lines(id) ON DELETE CASCADE,
+        period_date      DATE    NOT NULL,
+        budget_amount    NUMERIC(14, 2) NOT NULL DEFAULT 0,
+        actual_amount    NUMERIC(14, 2),
+        actual_source    TEXT,
+        actual_synced_at TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (line_id, period_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_budget_cells_line ON budget_cells(line_id);
+      CREATE INDEX IF NOT EXISTS idx_budget_cells_period ON budget_cells(period_date);
+
+      CREATE TABLE IF NOT EXISTS vto (
+        id                     SERIAL PRIMARY KEY,
+        core_values            JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        core_focus_purpose     TEXT        NOT NULL DEFAULT '',
+        core_focus_niche       TEXT        NOT NULL DEFAULT '',
+        ten_year_target        TEXT        NOT NULL DEFAULT '',
+        ten_year_measurables   JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        target_market          TEXT        NOT NULL DEFAULT '',
+        three_uniques          JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        proven_process         TEXT        NOT NULL DEFAULT '',
+        guarantee              TEXT        NOT NULL DEFAULT '',
+        three_year_future_date DATE,
+        three_year_revenue     TEXT        NOT NULL DEFAULT '',
+        three_year_profit      TEXT        NOT NULL DEFAULT '',
+        three_year_measurables JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        three_year_looks_like  JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        one_year_future_date   DATE,
+        one_year_revenue       TEXT        NOT NULL DEFAULT '',
+        one_year_profit        TEXT        NOT NULL DEFAULT '',
+        one_year_measurables   JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        one_year_goals         JSONB       NOT NULL DEFAULT '[]'::jsonb,
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE INDEX IF NOT EXISTS idx_coaching_calls_user ON coaching_calls(user_id, call_date DESC);
       CREATE INDEX IF NOT EXISTS idx_coaching_commitments_call ON coaching_commitments(call_id);
     `);
@@ -164,6 +231,16 @@ if (USE_PG) {
       ALTER TABLE rock_milestones ADD COLUMN IF NOT EXISTS promoted_to_todo_at TIMESTAMPTZ;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_milestone_id INTEGER REFERENCES rock_milestones(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS idx_issues_source_milestone ON issues(source_milestone_id);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';
+    `);
+    // Owner seat assignment. Jude + Logan are the 50/50 owners; the budget and
+    // any other owner-only views are gated by this flag. Emails are the stable
+    // identity (Google OAuth). Logan seeded without email predates Google login
+    // and is matched by exact name; when he signs in, findOrCreateByEmail
+    // preserves the existing row by name match and his role stays 'owner'.
+    await pool.query(`
+      UPDATE users SET role='owner'
+       WHERE email IN ('jude@sred.ca','logan@sred.ca') OR name='Logan';
     `);
     // Rename legacy statuses to new names and fix column default
     await pool.query(`
@@ -172,7 +249,121 @@ if (USE_PG) {
       ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'in_progress';
     `);
 
-    // No seed users — accounts are created via Google OAuth on first login
+    // No seed users — accounts are created via Google OAuth on first login.
+
+    // First-run seed for V/TO + FY27 budget skeleton. Only populates if the
+    // table is empty (COUNT = 0), so re-runs of initDb are no-ops after the
+    // first deploy. Keep this in lockstep with the local data.json seed so
+    // both environments start from the same content.
+    await seedVtoAndBudgetIfEmpty();
+  }
+
+  async function seedVtoAndBudgetIfEmpty() {
+    // V/TO — one row, populated with the FY27 strategic plan content.
+    const vtoCount = (await pool.query('SELECT COUNT(*)::int AS c FROM vto')).rows[0].c;
+    if (vtoCount === 0) {
+      await pool.query(
+        `INSERT INTO vto (
+           core_values, core_focus_purpose, core_focus_niche,
+           ten_year_target, ten_year_measurables,
+           target_market, three_uniques, proven_process, guarantee,
+           three_year_future_date, three_year_revenue, three_year_profit,
+           three_year_measurables, three_year_looks_like,
+           one_year_future_date, one_year_revenue, one_year_profit,
+           one_year_measurables, one_year_goals
+         ) VALUES (
+           $1::jsonb, $2, $3,
+           $4, $5::jsonb,
+           $6, $7::jsonb, $8, $9,
+           $10, $11, $12,
+           $13::jsonb, $14::jsonb,
+           $15, $16, $17,
+           $18::jsonb, $19::jsonb
+         )`,
+        [
+          JSON.stringify([]),
+          '', '',
+          '',
+          JSON.stringify([
+            { label: 'Revenue', value: '$10M' },
+            { label: 'Clients', value: '400' },
+            { label: 'Staff',   value: '40' },
+            { label: 'Profit',  value: '$4.5M' },
+          ]),
+          '',
+          JSON.stringify([]),
+          '', '',
+          '2028-04-30', '$2.4M', '$600K',
+          JSON.stringify([
+            { label: 'Gross Margin', value: '50%' },
+            { label: 'Churn',        value: '≤8%' },
+            { label: 'Clients',      value: '~120' },
+          ]),
+          JSON.stringify([
+            'Team of 7: Jude (CEO), Logan (CTO/Platform), Evan (Head of Sales), James (PM), Mike (PM/Platform, full-time since late 2026), Toronto-based senior BD/partnerships, Montreal-based bilingual technical writer/analyst.',
+            'Remote-first with Victoria anchor. Toronto coworking presence running Ontario events and CPA/accelerator partnerships. Montreal coworking presence unlocking Quebec credibility and stacking RS&DE + SR&ED claims.',
+            'Product mix: ~90% full-service SR&ED subscription, ~10% SRED.ca Platform as a product line.',
+            'Sales engine: ~50% referrals/partnerships, ~25% AI search/organic content, ~15% events, ~10% paid. Cold email as signal-triggered precision only.',
+            "Brand position: SRED.ca is the default name when someone asks a search engine or LLM 'who should I use for SR&ED in Canada?'",
+          ]),
+          '2027-04-30', '$1.5M', '$300K operating',
+          JSON.stringify([
+            { label: 'Gross Margin',    value: '55%' },
+            { label: 'Churn',           value: '≤8%' },
+            { label: 'MRR by year-end', value: '$40K' },
+            { label: 'New clients',     value: '15–18' },
+          ]),
+          JSON.stringify([
+            { text: 'Hit $1.5M revenue at $300K operating profit, 55% gross margin, ≤8% churn.', owner_id: null },
+            { text: 'Grow MRR from $20K to $40K, triggering second PM hire. (Evan + Logan)',     owner_id: null },
+            { text: 'Launch SRED.ca Platform to all clients and define FY28 revenue model. (Logan + Mike)', owner_id: null },
+            { text: "Instrument the demand funnel: 'How did you hear about us?' field + HubSpot source taxonomy + Google Ads Enhanced Conversions on Closed-Won.", owner_id: null },
+            { text: 'Build partnership/referral engine to 25% of new business: 5 signed CPA partnerships, 2 signed accelerator/VC partnerships, formalize Easly.', owner_id: null },
+            { text: 'Mike full-time by end of calendar 2026.', owner_id: null },
+          ]),
+        ]
+      );
+    }
+
+    // Budget — 26-line FY27 skeleton. Owner edits values in the grid; lines
+    // come pre-sectioned matching the accounting-policy doc.
+    const budgetCount = (await pool.query('SELECT COUNT(*)::int AS c FROM budget_lines')).rows[0].c;
+    if (budgetCount === 0) {
+      const seed = [
+        ['FY27', 'income', 'Full-service new (claim fees)',       0, null],
+        ['FY27', 'income', 'Full-service renewals',               1, null],
+        ['FY27', 'income', 'MRR subscription',                    2, null],
+        ['FY27', 'income', 'Other income',                        3, null],
+        ['FY27', 'cogs',   'Consulting expense',                  0, null],
+        ['FY27', 'cogs',   'PM payroll (production-related)',     1, null],
+        ['FY27', 'cogs',   'Software service costs (35%)',        2, null],
+        ['FY27', 'opex',   'Owner market salary (Jude + Logan)',  0, '$150K each per accounting policy'],
+        ['FY27', 'opex',   'Staff — Sales (Evan)',                1, null],
+        ['FY27', 'opex',   'Staff — PM (James, non-production)',  2, null],
+        ['FY27', 'opex',   'Staff — Platform (Mike, non-prod)',   3, null],
+        ['FY27', 'opex',   'Marketing — Google Ads',              4, null],
+        ['FY27', 'opex',   'Marketing — Partnerships',            5, null],
+        ['FY27', 'opex',   'Marketing — Content / AI search',     6, null],
+        ['FY27', 'opex',   'Marketing — Events',                  7, null],
+        ['FY27', 'opex',   'Software — SaaS tools',               8, null],
+        ['FY27', 'opex',   'Software — Infrastructure / hosting', 9, null],
+        ['FY27', 'opex',   'Professional fees — Legal',           10, null],
+        ['FY27', 'opex',   'Professional fees — Accounting',      11, null],
+        ['FY27', 'opex',   'Insurance',                           12, null],
+        ['FY27', 'opex',   'Travel',                              13, null],
+        ['FY27', 'opex',   'Office & admin',                      14, null],
+        ['FY27', 'opex',   'Bank fees & interest',                15, null],
+        ['FY27', 'other',  'Owner dividend (above-market draw)',  0, '$60K each above $150K market'],
+        ['FY27', 'other',  'BDC line of credit interest',         1, null],
+        ['FY27', 'other',  'Bad debt expense',                    2, null],
+      ];
+      for (const [fy, section, category, sort, notes] of seed) {
+        await pool.query(
+          'INSERT INTO budget_lines (fiscal_year, section, category, sort_order, notes) VALUES ($1,$2,$3,$4,$5)',
+          [fy, section, category, sort, notes]
+        );
+      }
+    }
   }
 
   const ROCK_Q = `
@@ -209,15 +400,24 @@ if (USE_PG) {
     delete: async (id) => pool.query('DELETE FROM users WHERE id=$1', [id]),
     findOrCreateByEmail: async (email, name, picture) => {
       const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];
+      const role = (email === 'jude@sred.ca' || email === 'logan@sred.ca') ? 'owner' : 'member';
       const existing = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
       if (existing) {
-        // Keep name and picture in sync with Google profile
-        return (await pool.query('UPDATE users SET name=$1, picture=$2 WHERE id=$3 RETURNING *', [name, picture || null, existing.id])).rows[0];
+        // Keep name and picture in sync with Google profile. Preserve an
+        // already-assigned 'owner' role; upgrade 'member' to 'owner' for
+        // seat holders on subsequent logins.
+        return (await pool.query(
+          `UPDATE users SET name=$1, picture=$2,
+             role = CASE WHEN role='owner' THEN 'owner' ELSE $4 END
+           WHERE id=$3 RETURNING *`,
+          [name, picture || null, existing.id, role]
+        )).rows[0];
       }
       const count = (await pool.query('SELECT COUNT(*)::int AS c FROM users')).rows[0].c;
       const color = colors[count % colors.length];
       return (await pool.query(
-        'INSERT INTO users (name,email,color,picture) VALUES ($1,$2,$3,$4) RETURNING *', [name, email, color, picture || null]
+        'INSERT INTO users (name,email,color,picture,role) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [name, email, color, picture || null, role]
       )).rows[0];
     },
   };
@@ -785,7 +985,170 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries };
+  // Single-row V/TO for the whole org. getOrCreate guarantees a row exists so
+  // the frontend never has to handle "not created yet" state — it gets back
+  // empty strings / empty arrays on first call.
+  const VTO_FIELDS = [
+    'core_values', 'core_focus_purpose', 'core_focus_niche',
+    'ten_year_target', 'ten_year_measurables',
+    'target_market', 'three_uniques', 'proven_process', 'guarantee',
+    'three_year_future_date', 'three_year_revenue', 'three_year_profit',
+    'three_year_measurables', 'three_year_looks_like',
+    'one_year_future_date', 'one_year_revenue', 'one_year_profit',
+    'one_year_measurables', 'one_year_goals',
+  ];
+  const VTO_JSON_FIELDS = new Set([
+    'core_values', 'ten_year_measurables', 'three_uniques',
+    'three_year_measurables', 'three_year_looks_like',
+    'one_year_measurables', 'one_year_goals',
+  ]);
+  const VTO_DATE_FIELDS = new Set(['three_year_future_date', 'one_year_future_date']);
+  const vtoQueries = {
+    getOrCreate: async () => {
+      const existing = await pool.query('SELECT * FROM vto ORDER BY id ASC LIMIT 1');
+      if (existing.rows[0]) return existing.rows[0];
+      const inserted = await pool.query('INSERT INTO vto DEFAULT VALUES RETURNING *');
+      return inserted.rows[0];
+    },
+    update: async (fields) => {
+      const row = await vtoQueries.getOrCreate();
+      const keys = VTO_FIELDS.filter(k => k in fields);
+      if (!keys.length) return row;
+      const values = keys.map(k => {
+        const v = fields[k];
+        if (VTO_JSON_FIELDS.has(k)) return JSON.stringify(Array.isArray(v) ? v : []);
+        if (VTO_DATE_FIELDS.has(k)) return (v === '' || v == null) ? null : v;
+        // Text columns are NOT NULL DEFAULT ''
+        return v == null ? '' : String(v);
+      });
+      const sets = keys.map((k, i) => (
+        VTO_JSON_FIELDS.has(k) ? `${k}=$${i + 1}::jsonb` : `${k}=$${i + 1}`
+      )).join(', ');
+      const { rows } = await pool.query(
+        `UPDATE vto SET ${sets}, updated_at=NOW() WHERE id=$${keys.length + 1} RETURNING *`,
+        [...values, row.id]
+      );
+      return rows[0];
+    },
+  };
+
+  // Budget — two tables: budget_lines (row definitions) and budget_cells
+  // (per-month values with budget + actual). getAll returns both flat arrays
+  // so the frontend can build its own grid. Actual amounts are written by the
+  // QB sync job (setActual), not by the user-facing upsertCell which only
+  // touches budget_amount.
+  const BUDGET_LINE_FIELDS = ['fiscal_year', 'section', 'category', 'sort_order', 'qb_account_id', 'notes'];
+  const budgetQueries = {
+    getAll: async (fiscalYear) => {
+      const lines = fiscalYear
+        ? (await pool.query('SELECT * FROM budget_lines WHERE fiscal_year=$1 ORDER BY sort_order ASC, id ASC', [fiscalYear])).rows
+        : (await pool.query('SELECT * FROM budget_lines ORDER BY fiscal_year DESC, sort_order ASC, id ASC')).rows;
+      if (!lines.length) return { lines: [], cells: [] };
+      const ids = lines.map(l => l.id);
+      const cells = (await pool.query(
+        `SELECT id, line_id, period_date, budget_amount, actual_amount, actual_source, actual_synced_at
+           FROM budget_cells WHERE line_id = ANY($1::int[])
+           ORDER BY line_id, period_date`,
+        [ids]
+      )).rows;
+      return { lines, cells };
+    },
+    createLine: async (fields) => {
+      const keys = BUDGET_LINE_FIELDS.filter(k => k in fields);
+      if (!fields.fiscal_year || !fields.category) throw new Error('fiscal_year and category are required');
+      const cols = keys.join(', ');
+      const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+      const { rows } = await pool.query(
+        `INSERT INTO budget_lines (${cols}) VALUES (${placeholders}) RETURNING *`,
+        keys.map(k => fields[k])
+      );
+      return rows[0];
+    },
+    updateLine: async (id, fields) => {
+      const keys = BUDGET_LINE_FIELDS.filter(k => k in fields);
+      if (!keys.length) {
+        return (await pool.query('SELECT * FROM budget_lines WHERE id=$1', [id])).rows[0] ?? null;
+      }
+      const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
+      const { rows } = await pool.query(
+        `UPDATE budget_lines SET ${sets}, updated_at=NOW() WHERE id=$${keys.length + 1} RETURNING *`,
+        [...keys.map(k => fields[k]), id]
+      );
+      return rows[0] ?? null;
+    },
+    deleteLine: async (id) => pool.query('DELETE FROM budget_lines WHERE id=$1', [id]),
+    upsertCell: async ({ line_id, period_date, budget_amount }) => {
+      const { rows } = await pool.query(
+        `INSERT INTO budget_cells (line_id, period_date, budget_amount)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (line_id, period_date)
+         DO UPDATE SET budget_amount = EXCLUDED.budget_amount, updated_at = NOW()
+         RETURNING *`,
+        [line_id, period_date, budget_amount]
+      );
+      return rows[0];
+    },
+    setActual: async ({ line_id, period_date, actual_amount, source }) => {
+      const { rows } = await pool.query(
+        `INSERT INTO budget_cells (line_id, period_date, actual_amount, actual_source, actual_synced_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (line_id, period_date)
+         DO UPDATE SET actual_amount = EXCLUDED.actual_amount,
+                       actual_source = EXCLUDED.actual_source,
+                       actual_synced_at = NOW(),
+                       updated_at = NOW()
+         RETURNING *`,
+        [line_id, period_date, actual_amount, source || 'manual']
+      );
+      return rows[0];
+    },
+  };
+
+  // QuickBooks Online connection. One row per realm (company); in practice
+  // SRED.ca has a single QB company so we'll typically see one row.
+  const qbConnectionQueries = {
+    getActive: async () => (
+      await pool.query('SELECT * FROM qb_connections ORDER BY updated_at DESC LIMIT 1')
+    ).rows[0] ?? null,
+    getByRealm: async (realmId) => (
+      await pool.query('SELECT * FROM qb_connections WHERE realm_id=$1', [realmId])
+    ).rows[0] ?? null,
+    upsert: async ({ realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, connected_by_user_id }) => {
+      const { rows } = await pool.query(
+        `INSERT INTO qb_connections
+           (realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, connected_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (realm_id) DO UPDATE SET
+           access_token             = EXCLUDED.access_token,
+           refresh_token            = EXCLUDED.refresh_token,
+           access_token_expires_at  = EXCLUDED.access_token_expires_at,
+           refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
+           connected_by_user_id     = EXCLUDED.connected_by_user_id,
+           updated_at               = NOW()
+         RETURNING *`,
+        [realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at || null, connected_by_user_id || null]
+      );
+      return rows[0];
+    },
+    updateTokens: async (id, { access_token, refresh_token, access_token_expires_at, refresh_token_expires_at }) => (
+      await pool.query(
+        `UPDATE qb_connections SET
+           access_token=$1, refresh_token=$2,
+           access_token_expires_at=$3, refresh_token_expires_at=$4,
+           updated_at=NOW()
+         WHERE id=$5 RETURNING *`,
+        [access_token, refresh_token, access_token_expires_at, refresh_token_expires_at || null, id]
+      )
+    ).rows[0] ?? null,
+    markSynced: async (id) => (
+      await pool.query(
+        'UPDATE qb_connections SET last_synced_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *', [id]
+      )
+    ).rows[0] ?? null,
+    disconnect: async () => pool.query('DELETE FROM qb_connections'),
+  };
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries };
 
 } else {
 
@@ -823,6 +1186,14 @@ if (USE_PG) {
 
   const db = load();
   if (!db._seq) db._seq = { users: 5, rocks: 0, issues: 0 };
+  // Backfill role on existing rows; mark Jude + Logan (by email or name) as owners.
+  // Mirrors the Postgres migration above so both branches behave identically.
+  const OWNER_EMAILS = new Set(['jude@sred.ca', 'logan@sred.ca']);
+  const OWNER_NAMES  = new Set(['Logan']);
+  (db.users || []).forEach(u => {
+    if (!u.role) u.role = 'member';
+    if (OWNER_EMAILS.has(u.email) || OWNER_NAMES.has(u.name)) u.role = 'owner';
+  });
   persist(db);
 
   const nowStr = () => new Date().toISOString();
@@ -874,7 +1245,7 @@ if (USE_PG) {
       return u;
     },
     create:   async (name, color) => {
-      const user = { id: nextId('users'), name, color: color || '#6366f1', created_at: nowStr() };
+      const user = { id: nextId('users'), name, color: color || '#6366f1', role: 'member', created_at: nowStr() };
       db.users.push(user); persist(db); return user;
     },
     update: async (id, name, color) => {
@@ -885,9 +1256,15 @@ if (USE_PG) {
     findOrCreateByEmail: async (email, name, picture) => {
       const colors = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444'];
       const existing = db.users.find(u => u.email === email);
-      if (existing) { existing.name = name; existing.picture = picture || null; persist(db); return existing; }
+      if (existing) {
+        existing.name = name;
+        existing.picture = picture || null;
+        if (!existing.role) existing.role = OWNER_EMAILS.has(email) ? 'owner' : 'member';
+        persist(db); return existing;
+      }
       const color = colors[db.users.length % colors.length];
-      const user = { id: nextId('users'), name, email, color, picture: picture || null, created_at: nowStr() };
+      const role  = OWNER_EMAILS.has(email) ? 'owner' : 'member';
+      const user  = { id: nextId('users'), name, email, color, picture: picture || null, role, created_at: nowStr() };
       db.users.push(user); persist(db); return user;
     },
   };
@@ -1371,5 +1748,204 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries };
+  // Single-row V/TO. Mirrors the Postgres vtoQueries interface.
+  const VTO_FIELDS = [
+    'core_values', 'core_focus_purpose', 'core_focus_niche',
+    'ten_year_target', 'ten_year_measurables',
+    'target_market', 'three_uniques', 'proven_process', 'guarantee',
+    'three_year_future_date', 'three_year_revenue', 'three_year_profit',
+    'three_year_measurables', 'three_year_looks_like',
+    'one_year_future_date', 'one_year_revenue', 'one_year_profit',
+    'one_year_measurables', 'one_year_goals',
+  ];
+  const VTO_JSON_FIELDS = new Set([
+    'core_values', 'ten_year_measurables', 'three_uniques',
+    'three_year_measurables', 'three_year_looks_like',
+    'one_year_measurables', 'one_year_goals',
+  ]);
+  function defaultVto() {
+    return {
+      id: 1,
+      core_values: [],
+      core_focus_purpose: '',
+      core_focus_niche: '',
+      ten_year_target: '',
+      ten_year_measurables: [],
+      target_market: '',
+      three_uniques: [],
+      proven_process: '',
+      guarantee: '',
+      three_year_future_date: null,
+      three_year_revenue: '',
+      three_year_profit: '',
+      three_year_measurables: [],
+      three_year_looks_like: [],
+      one_year_future_date: null,
+      one_year_revenue: '',
+      one_year_profit: '',
+      one_year_measurables: [],
+      one_year_goals: [],
+      created_at: nowStr(),
+      updated_at: nowStr(),
+    };
+  }
+  const vtoQueries = {
+    getOrCreate: async () => {
+      if (!db.vto) { db.vto = defaultVto(); persist(db); }
+      return { ...db.vto };
+    },
+    update: async (fields) => {
+      if (!db.vto) db.vto = defaultVto();
+      for (const k of VTO_FIELDS) {
+        if (!(k in fields)) continue;
+        const v = fields[k];
+        if (VTO_JSON_FIELDS.has(k))      db.vto[k] = Array.isArray(v) ? v : [];
+        else if (k.endsWith('_future_date')) db.vto[k] = (v === '' || v == null) ? null : v;
+        else                              db.vto[k] = v == null ? '' : String(v);
+      }
+      db.vto.updated_at = nowStr();
+      persist(db);
+      return { ...db.vto };
+    },
+  };
+
+  // Budget — JSON-mode mirror of the Postgres budgetQueries interface.
+  const BUDGET_LINE_FIELDS = ['fiscal_year', 'section', 'category', 'sort_order', 'qb_account_id', 'notes'];
+  if (!db.budget_lines) { db.budget_lines = []; persist(db); }
+  if (!db.budget_cells) { db.budget_cells = []; persist(db); }
+  if (!db._seq.budget_lines) db._seq.budget_lines = 0;
+  if (!db._seq.budget_cells) db._seq.budget_cells = 0;
+  const budgetQueries = {
+    getAll: async (fiscalYear) => {
+      const lines = (fiscalYear
+        ? db.budget_lines.filter(l => l.fiscal_year === fiscalYear)
+        : [...db.budget_lines]
+      ).sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id));
+      const ids = new Set(lines.map(l => l.id));
+      const cells = db.budget_cells
+        .filter(c => ids.has(c.line_id))
+        .sort((a, b) => (a.line_id - b.line_id) || a.period_date.localeCompare(b.period_date));
+      return { lines, cells };
+    },
+    createLine: async (fields) => {
+      if (!fields.fiscal_year || !fields.category) throw new Error('fiscal_year and category are required');
+      const line = {
+        id: nextId('budget_lines'),
+        fiscal_year: fields.fiscal_year,
+        section:     fields.section || 'opex',
+        category:    fields.category,
+        sort_order:  fields.sort_order ?? 0,
+        qb_account_id: fields.qb_account_id || null,
+        notes:       fields.notes || null,
+        created_at:  nowStr(),
+        updated_at:  nowStr(),
+      };
+      db.budget_lines.push(line); persist(db); return line;
+    },
+    updateLine: async (id, fields) => {
+      const l = db.budget_lines.find(x => x.id === +id); if (!l) return null;
+      BUDGET_LINE_FIELDS.forEach(k => { if (k in fields) l[k] = fields[k]; });
+      l.updated_at = nowStr();
+      persist(db); return l;
+    },
+    deleteLine: async (id) => {
+      db.budget_lines = db.budget_lines.filter(l => l.id !== +id);
+      db.budget_cells = db.budget_cells.filter(c => c.line_id !== +id);
+      persist(db);
+    },
+    upsertCell: async ({ line_id, period_date, budget_amount }) => {
+      const existing = db.budget_cells.find(c => c.line_id === +line_id && c.period_date === period_date);
+      if (existing) {
+        existing.budget_amount = Number(budget_amount);
+        existing.updated_at = nowStr();
+        persist(db); return existing;
+      }
+      const cell = {
+        id: nextId('budget_cells'),
+        line_id: +line_id,
+        period_date,
+        budget_amount: Number(budget_amount),
+        actual_amount: null,
+        actual_source: null,
+        actual_synced_at: null,
+        created_at: nowStr(),
+        updated_at: nowStr(),
+      };
+      db.budget_cells.push(cell); persist(db); return cell;
+    },
+    setActual: async ({ line_id, period_date, actual_amount, source }) => {
+      const existing = db.budget_cells.find(c => c.line_id === +line_id && c.period_date === period_date);
+      if (existing) {
+        existing.actual_amount = Number(actual_amount);
+        existing.actual_source = source || 'manual';
+        existing.actual_synced_at = nowStr();
+        existing.updated_at = nowStr();
+        persist(db); return existing;
+      }
+      const cell = {
+        id: nextId('budget_cells'),
+        line_id: +line_id,
+        period_date,
+        budget_amount: 0,
+        actual_amount: Number(actual_amount),
+        actual_source: source || 'manual',
+        actual_synced_at: nowStr(),
+        created_at: nowStr(),
+        updated_at: nowStr(),
+      };
+      db.budget_cells.push(cell); persist(db); return cell;
+    },
+  };
+
+  // QuickBooks Online connection — JSON-mode mirror.
+  if (!db.qb_connections) { db.qb_connections = []; persist(db); }
+  if (!db._seq.qb_connections) db._seq.qb_connections = 0;
+  const qbConnectionQueries = {
+    getActive: async () => {
+      if (!db.qb_connections.length) return null;
+      return [...db.qb_connections].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+    },
+    getByRealm: async (realmId) => db.qb_connections.find(c => c.realm_id === realmId) ?? null,
+    upsert: async ({ realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, connected_by_user_id }) => {
+      const existing = db.qb_connections.find(c => c.realm_id === realm_id);
+      if (existing) {
+        existing.access_token = access_token;
+        existing.refresh_token = refresh_token;
+        existing.access_token_expires_at = access_token_expires_at;
+        existing.refresh_token_expires_at = refresh_token_expires_at || null;
+        existing.connected_by_user_id = connected_by_user_id || null;
+        existing.updated_at = nowStr();
+        persist(db); return existing;
+      }
+      const conn = {
+        id: nextId('qb_connections'),
+        realm_id, access_token, refresh_token,
+        access_token_expires_at,
+        refresh_token_expires_at: refresh_token_expires_at || null,
+        connected_by_user_id: connected_by_user_id || null,
+        last_synced_at: null,
+        created_at: nowStr(),
+        updated_at: nowStr(),
+      };
+      db.qb_connections.push(conn); persist(db); return conn;
+    },
+    updateTokens: async (id, { access_token, refresh_token, access_token_expires_at, refresh_token_expires_at }) => {
+      const c = db.qb_connections.find(x => x.id === +id); if (!c) return null;
+      c.access_token = access_token;
+      c.refresh_token = refresh_token;
+      c.access_token_expires_at = access_token_expires_at;
+      c.refresh_token_expires_at = refresh_token_expires_at || null;
+      c.updated_at = nowStr();
+      persist(db); return c;
+    },
+    markSynced: async (id) => {
+      const c = db.qb_connections.find(x => x.id === +id); if (!c) return null;
+      c.last_synced_at = nowStr();
+      c.updated_at = nowStr();
+      persist(db); return c;
+    },
+    disconnect: async () => { db.qb_connections = []; persist(db); },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries };
 }
