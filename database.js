@@ -452,6 +452,7 @@ if (USE_PG) {
         ['FY27', 'opex',   'Travel',                              13, null],
         ['FY27', 'opex',   'Office & admin',                      14, null],
         ['FY27', 'opex',   'Bank fees & interest',                15, null],
+        ['FY27', 'opex',   'Rent',                                 16, 'Victoria anchor — ~$5K/month FY26 actual'],
         ['FY27', 'other',  'Owner dividend (above-market draw)',  0, '$60K each above $150K market'],
         ['FY27', 'other',  'BDC line of credit interest',         1, null],
         ['FY27', 'other',  'Bad debt expense',                    2, null],
@@ -460,6 +461,123 @@ if (USE_PG) {
         await pool.query(
           'INSERT INTO budget_lines (fiscal_year, section, category, sort_order, notes) VALUES ($1,$2,$3,$4,$5)',
           [fy, section, category, sort, notes]
+        );
+      }
+    } else {
+      // Existing-deploy path: ensure the Rent line exists even if the
+      // initial 26-line seed already ran before Rent was added.
+      const hasRent = (await pool.query(
+        "SELECT 1 FROM budget_lines WHERE fiscal_year='FY27' AND category='Rent' LIMIT 1"
+      )).rows[0];
+      if (!hasRent) {
+        await pool.query(
+          `INSERT INTO budget_lines (fiscal_year, section, category, sort_order, notes)
+           VALUES ('FY27', 'opex', 'Rent', 16, 'Victoria anchor — ~$5K/month FY26 actual')`
+        );
+      }
+    }
+
+    // FY27 budget values — monthly distribution derived from FY26 actuals
+    // (seasonality for full-service revenue), a back-loaded linear ramp for
+    // MRR, and flat /12 for the rest. Idempotent: skips any line that
+    // already has a non-zero budget cell so owner edits are preserved.
+    await seedBudgetValuesIfEmpty();
+  }
+
+  async function seedBudgetValuesIfEmpty() {
+    // FY27 months: May 2026 → April 2027.
+    const MONTHS = [
+      '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01',
+      '2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01',
+      '2027-01-01', '2027-02-01', '2027-03-01', '2027-04-01',
+    ];
+    // FY26 revenue seasonality (from the May 2025–Apr 2026 P&L).
+    // Applied to the seasonal revenue lines; sums to 1.0.
+    const SEASONAL = [
+      0.0636, 0.1078, 0.1224, 0.0069, 0.1862, 0.1419,
+      0.0401, 0.0376, 0.0368, 0.0710, 0.1117, 0.0740,
+    ];
+    // MRR back-loaded ramp ($20K May → $40K Apr). Hand-curated so the
+    // curve reflects slow early ramp + steeper growth as platform matures.
+    const MRR_RAMP = [
+      20000, 20000, 21000, 22000, 23000, 24000,
+      26000, 28000, 31000, 33000, 36000, 40000,
+    ];
+    // Category → { annual, shape }
+    // - 'seasonal' uses SEASONAL weights
+    // - 'mrr'      uses MRR_RAMP verbatim
+    // - 'flat'     distributes evenly /12
+    // - 'skip'     no cells written (line stays $0)
+    const PLAN = {
+      // Income (annual $1.5M)
+      'Full-service new (claim fees)':        { annual: 900000, shape: 'seasonal' },
+      'Full-service renewals':                { annual: 230000, shape: 'flat' },
+      'MRR subscription':                     { annual: 320000, shape: 'mrr' },
+      'Other income':                         { annual: 50000,  shape: 'flat' },
+      // COGS (annual $675K → 55% GM)
+      'Consulting expense':                   { annual: 15000,  shape: 'flat' },
+      'PM payroll (production-related)':      { annual: 620000, shape: 'flat' },
+      'Software service costs (35%)':         { annual: 40000,  shape: 'flat' },
+      // OpEx — James + Mike fully in COGS so OpEx lines stay $0
+      'Owner market salary (Jude + Logan)':   { annual: 300000, shape: 'flat' },
+      'Staff — Sales (Evan)':                 { annual: 100000, shape: 'flat' },
+      'Staff — PM (James, non-production)':   { annual: 0,      shape: 'skip' },
+      'Staff — Platform (Mike, non-prod)':    { annual: 0,      shape: 'skip' },
+      'Marketing — Google Ads':               { annual: 50000,  shape: 'flat' },
+      'Marketing — Partnerships':             { annual: 10000,  shape: 'flat' },
+      'Marketing — Content / AI search':      { annual: 15000,  shape: 'flat' },
+      'Marketing — Events':                   { annual: 15000,  shape: 'flat' },
+      'Software — SaaS tools':                { annual: 40000,  shape: 'flat' },
+      'Software — Infrastructure / hosting':  { annual: 20000,  shape: 'flat' },
+      'Professional fees — Legal':            { annual: 15000,  shape: 'flat' },
+      'Professional fees — Accounting':       { annual: 20000,  shape: 'flat' },
+      'Insurance':                            { annual: 4000,   shape: 'flat' },
+      'Travel':                               { annual: 15000,  shape: 'flat' },
+      'Office & admin':                       { annual: 15000,  shape: 'flat' },
+      'Bank fees & interest':                 { annual: 5000,   shape: 'flat' },
+      'Rent':                                 { annual: 60000,  shape: 'flat' },
+      // Other
+      'Owner dividend (above-market draw)':   { annual: 120000, shape: 'flat' },
+      'BDC line of credit interest':          { annual: 5000,   shape: 'flat' },
+      'Bad debt expense':                     { annual: 5000,   shape: 'flat' },
+    };
+
+    function distribute(annual, shape) {
+      if (shape === 'skip') return null;
+      if (shape === 'mrr')  return MRR_RAMP.slice();
+      if (shape === 'seasonal') return SEASONAL.map(w => Math.round(annual * w));
+      // flat: round to nearest dollar, absorb rounding drift into last month
+      const monthly = Math.round(annual / 12);
+      const arr = MONTHS.map(() => monthly);
+      arr[arr.length - 1] = annual - monthly * (MONTHS.length - 1);
+      return arr;
+    }
+
+    const lines = (await pool.query(
+      "SELECT id, category FROM budget_lines WHERE fiscal_year='FY27'"
+    )).rows;
+    for (const line of lines) {
+      const plan = PLAN[line.category];
+      if (!plan) continue;
+      const amounts = distribute(plan.annual, plan.shape);
+      if (!amounts) continue;
+
+      // Idempotency: skip lines that already have any non-zero budget cell.
+      // This keeps the draft from clobbering owner edits.
+      const hasBudget = (await pool.query(
+        'SELECT 1 FROM budget_cells WHERE line_id=$1 AND budget_amount > 0 LIMIT 1',
+        [line.id]
+      )).rows[0];
+      if (hasBudget) continue;
+
+      for (let i = 0; i < MONTHS.length; i++) {
+        if (!amounts[i]) continue;
+        await pool.query(
+          `INSERT INTO budget_cells (line_id, period_date, budget_amount)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (line_id, period_date)
+           DO UPDATE SET budget_amount = EXCLUDED.budget_amount, updated_at = NOW()`,
+          [line.id, MONTHS[i], amounts[i]]
         );
       }
     }
