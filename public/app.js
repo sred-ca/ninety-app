@@ -2922,6 +2922,12 @@ async function loadVto() {
   state.vto = await api.get('/api/vto');
   state.vtoEditing = null;
   renderVto();
+  // Wire the Print button to open the branded standalone page. ?auto=1
+  // makes the new tab trigger its own print dialog once the fonts load.
+  const printBtn = qs('#vto-print-btn');
+  if (printBtn) {
+    printBtn.onclick = () => window.open('/vto-print.html?auto=1', '_blank');
+  }
 }
 
 async function saveVtoSection(patch) {
