@@ -3572,6 +3572,34 @@ function parseMoneyInput(str) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// Classify a budget cell against its line's section so the UI can paint
+// the actual amount green/red. Good direction is section-specific:
+//   Income  → higher is better (actual ≥ 90% of budget = favorable)
+//   Expense → lower  is better (actual ≤ 110% of budget = favorable)
+// Within ±10% either way counts as on-plan (still green — matches the
+// "within 10% = green" rule from the ask). Returns null when there's no
+// actual to color (future month, pre-sync) or both sides are zero.
+function variancePaint(line, cell) {
+  if (!cell || cell.actual_amount == null) return null;
+  const budget = Number(cell.budget_amount) || 0;
+  const actual = Number(cell.actual_amount) || 0;
+  if (budget === 0 && actual === 0) return null;
+  if (budget === 0) return 'unfavorable'; // unbudgeted spend / unbudgeted revenue both flag
+  const isRevenue = line.section === 'income';
+  if (isRevenue) return actual < budget * 0.9  ? 'unfavorable' : 'favorable';
+  return                actual > budget * 1.1 ? 'unfavorable' : 'favorable';
+}
+function varianceTitle(line, cell) {
+  if (!cell) return '';
+  const src = cell.actual_source ? `Actual source: ${cell.actual_source}` : '';
+  if (cell.actual_amount == null) return src;
+  const budget = Number(cell.budget_amount) || 0;
+  if (budget === 0) return `${src}${src ? ' · ' : ''}No budget set`;
+  const pct = ((Number(cell.actual_amount) - budget) / budget) * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${src}${src ? ' · ' : ''}Variance ${sign}${pct.toFixed(1)}% vs budget`;
+}
+
 async function loadBudget() {
   populateBudgetFySelect();
   const [data, qbStatus] = await Promise.all([
@@ -3967,7 +3995,9 @@ function renderBudgetBody(months) {
         actual.textContent = (cell && cell.actual_amount != null)
           ? fmtMoney(cell.actual_amount)
           : '—';
-        if (cell && cell.actual_source) actual.title = `Actual source: ${cell.actual_source}`;
+        const paint = variancePaint(line, cell);
+        if (paint) actual.classList.add(paint);
+        actual.title = varianceTitle(line, cell);
 
         wrap.append(bInput, actual);
         td.appendChild(wrap);

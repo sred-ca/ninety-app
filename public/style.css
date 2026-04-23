@@ -139,6 +139,20 @@ body {
 
 .switch-icon { width: 14px; height: 14px; margin-left: auto; flex-shrink: 0; }
 
+/* SemiSoft Co. — the joke. Subtle, spiritually deniable, definitely on. */
+.semisoft-badge {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; margin-top: 6px;
+  font-family: var(--font); font-size: 10px; font-weight: 600;
+  color: var(--text3, #6b6b8a);
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+.semisoft-badge:hover { opacity: 1; color: var(--text2); }
+.semisoft-badge svg { flex-shrink: 0; }
+
 /* ── Main Content ─────────────────────────────────────────────────── */
 .main {
   height: 100vh;
@@ -2852,7 +2866,12 @@ textarea { resize: vertical; min-height: 72px; }
   font-variant-numeric: tabular-nums;
   padding: 0 8px;
   min-height: 14px;
+  font-weight: 500;
 }
+/* Variance paint: favorable (on-plan or better) vs unfavorable (>10% bad).
+   Direction is section-specific — see variancePaint() in app.js. */
+.budget-cell-actual.favorable   { color: var(--green); }
+.budget-cell-actual.unfavorable { color: var(--red); }
 
 /* Map QB modal */
 .map-qb-table { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
