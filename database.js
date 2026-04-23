@@ -214,6 +214,14 @@ if (USE_PG) {
 
       CREATE INDEX IF NOT EXISTS idx_coaching_calls_user ON coaching_calls(user_id, call_date DESC);
       CREATE INDEX IF NOT EXISTS idx_coaching_commitments_call ON coaching_commitments(call_id);
+
+      -- Per-user visibility of sidebar tabs that aren't member defaults.
+      -- Row presence = granted. Owners bypass this table entirely.
+      CREATE TABLE IF NOT EXISTS user_tab_access (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        tab     TEXT    NOT NULL,
+        PRIMARY KEY (user_id, tab)
+      );
     `);
     // Migrate existing tables that may lack newer columns
     await pool.query(`
@@ -1148,7 +1156,45 @@ if (USE_PG) {
     disconnect: async () => pool.query('DELETE FROM qb_connections'),
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries };
+  // Per-user sidebar tab visibility. Only the assignable tabs are stored here;
+  // default tabs (my90, issues, team-issues, meetings, insights) are always on.
+  const tabAccessQueries = {
+    listForUser: async (userId) => {
+      const { rows } = await pool.query(
+        'SELECT tab FROM user_tab_access WHERE user_id=$1 ORDER BY tab', [userId]
+      );
+      return rows.map(r => r.tab);
+    },
+    listAll: async () => {
+      const { rows } = await pool.query('SELECT user_id, tab FROM user_tab_access');
+      const by = {};
+      rows.forEach(r => { (by[r.user_id] ||= []).push(r.tab); });
+      return by; // { <user_id>: ['vto','rocks', ...] }
+    },
+    set: async (userId, tabs) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM user_tab_access WHERE user_id=$1', [userId]);
+        const unique = Array.from(new Set((tabs || []).filter(Boolean)));
+        for (const tab of unique) {
+          await client.query(
+            'INSERT INTO user_tab_access (user_id,tab) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+            [userId, tab]
+          );
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      return tabAccessQueries.listForUser(userId);
+    },
+  };
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries };
 
 } else {
 
@@ -1947,5 +1993,25 @@ if (USE_PG) {
     disconnect: async () => { db.qb_connections = []; persist(db); },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries };
+  if (!db.user_tab_access) { db.user_tab_access = []; persist(db); }
+
+  const tabAccessQueries = {
+    listForUser: async (userId) =>
+      db.user_tab_access.filter(r => r.user_id === +userId).map(r => r.tab).sort(),
+    listAll: async () => {
+      const by = {};
+      db.user_tab_access.forEach(r => { (by[r.user_id] ||= []).push(r.tab); });
+      return by;
+    },
+    set: async (userId, tabs) => {
+      const uid = +userId;
+      db.user_tab_access = db.user_tab_access.filter(r => r.user_id !== uid);
+      const unique = Array.from(new Set((tabs || []).filter(Boolean)));
+      unique.forEach(tab => db.user_tab_access.push({ user_id: uid, tab }));
+      persist(db);
+      return tabAccessQueries.listForUser(uid);
+    },
+  };
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries };
 }

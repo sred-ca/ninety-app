@@ -223,16 +223,26 @@ function enterApp(user) {
   qs('#login-screen').classList.add('hidden');
   qs('#app').classList.remove('hidden');
   updateSidebarUser();
-  // Show the Stella nav only when coaching is enabled on the server.
+  // Reveal assignable sidebar tabs per the admin matrix (owners see all).
+  // The default tabs (My 90, To-Dos, Issues, Meetings, Insights) are always on.
+  applyTabVisibility(user);
+  // Show the Stella nav only when coaching is enabled on the server AND
+  // the user has the tab. Coaching being disabled wins over tab grant.
   api.get('/api/coaching/enabled').then(d => {
-    if (d && d.enabled) qs('#stella-nav-item').style.display = '';
+    if (!(d && d.enabled)) qs('#stella-nav-item').style.display = 'none';
   }).catch(() => { /* silent — coaching flag is optional */ });
-  // Owner-only tabs: Budget. role comes from /api/me; member users
-  // never see the Budget button and hitting /api/budget returns 403.
-  if (user && user.role === 'owner') {
-    qs('#budget-nav-item').style.display = '';
-  }
   loadAll();
+}
+
+function applyTabVisibility(user) {
+  const grants = new Set(user?.tabs || []);
+  const isOwner = user?.role === 'owner';
+  const show = (tab) => isOwner || grants.has(tab);
+  qs('#vto-nav-item')   .style.display = show('vto')    ? '' : 'none';
+  qs('#rocks-nav-item') .style.display = show('rocks')  ? '' : 'none';
+  qs('#budget-nav-item').style.display = show('budget') ? '' : 'none';
+  qs('#stella-nav-item').style.display = show('stella') ? '' : 'none';
+  qs('#admin-nav-item') .style.display = isOwner        ? '' : 'none';
 }
 
 function updateSidebarUser() {
@@ -258,6 +268,7 @@ qsa('.nav-item').forEach(btn => {
     if (view === 'insights')  loadInsights();
     if (view === 'stella')    loadStella();
     if (view === 'budget')    loadBudget();
+    if (view === 'admin')     loadAdmin();
   });
 });
 
@@ -4035,3 +4046,88 @@ async function loadAll() {
     showLoginScreen(oauthError ? (msgs[oauthError] || 'Sign-in failed.') : null);
   }
 })();
+
+/* ════════════════════════════════════════════════════════════════════
+   ADMIN — tab access per user (owner-only)
+   ════════════════════════════════════════════════════════════════════ */
+
+const ADMIN_TAB_LABELS = {
+  vto:    'V/TO',
+  rocks:  'Rocks',
+  budget: 'Budget',
+  stella: 'Stella',
+};
+
+async function loadAdmin() {
+  try {
+    const d = await api.get('/api/admin/tab-access');
+    renderAdmin(d);
+  } catch (e) {
+    qs('#admin-table').innerHTML = `<div class="my90-empty">Failed to load: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderAdmin({ assignable_tabs, users }) {
+  const host = qs('#admin-table');
+  host.style.setProperty('--admin-tab-cols', String(assignable_tabs.length));
+
+  const headerCells = assignable_tabs.map(t =>
+    `<span>${esc(ADMIN_TAB_LABELS[t] || t)}</span>`
+  ).join('');
+  const header = `
+    <div class="admin-table-header">
+      <span>User</span>
+      <span>Role</span>
+      ${headerCells}
+    </div>
+  `;
+
+  const rowsHtml = users.map(u => {
+    const grantedSet = new Set(u.tabs || []);
+    const tabCells = assignable_tabs.map(t => {
+      if (u.role === 'owner') {
+        return `<div class="admin-tab-cell granted-owner" title="Owners always see every tab"></div>`;
+      }
+      const checked = grantedSet.has(t) ? 'checked' : '';
+      return `<div class="admin-tab-cell"><input type="checkbox" data-user-id="${u.id}" data-tab="${t}" ${checked} /></div>`;
+    }).join('');
+    return `
+      <div class="admin-table-row" data-user-id="${u.id}">
+        <div class="admin-cell-user">
+          <span class="admin-cell-user-name">${esc(u.name || '(no name)')}</span>
+          <span class="admin-cell-user-email">${esc(u.email || '')}</span>
+        </div>
+        <span class="admin-cell-role ${u.role}">${u.role}</span>
+        ${tabCells}
+      </div>
+    `;
+  }).join('');
+
+  host.innerHTML = header + rowsHtml;
+
+  host.querySelectorAll('input[type="checkbox"][data-tab]').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const userId = cb.dataset.userId;
+      // Collect this user's currently-checked tabs after the toggle
+      const row = cb.closest('.admin-table-row');
+      const tabs = Array.from(row.querySelectorAll('input[type="checkbox"][data-tab]'))
+        .filter(c => c.checked)
+        .map(c => c.dataset.tab);
+      cb.disabled = true;
+      try {
+        await api.put(`/api/admin/tab-access/${userId}`, { tabs });
+        // If the edited user is me, my own tabs list changed — re-pull /api/me
+        // so the sidebar updates without a full reload.
+        if (state.currentUser && +userId === state.currentUser.id) {
+          const me = await api.get('/api/me');
+          if (me) { state.currentUser = me; applyTabVisibility(me); }
+        }
+      } catch (e) {
+        alert(e.message);
+        cb.checked = !cb.checked; // revert
+      } finally {
+        cb.disabled = false;
+      }
+    });
+  });
+}

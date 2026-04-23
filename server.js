@@ -1,7 +1,7 @@
 const express    = require('express');
 const path       = require('path');
 const crypto     = require('crypto');
-const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries } = require('./database');
+const { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries } = require('./database');
 const qb = require('./qb');
 
 const app  = express();
@@ -156,13 +156,22 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 });
 
-// Who am I? Includes role so the frontend can gate owner-only UI.
+// Which sidebar tabs are not default-on for members and can be granted by
+// owners via the Admin view. Must match the list the frontend renders.
+const ASSIGNABLE_TABS = ['vto', 'rocks', 'budget', 'stella'];
+
+// Who am I? Includes role so the frontend can gate owner-only UI, plus the
+// set of assignable tabs this user can see (owners implicitly get all).
 app.get('/api/me', wrap(async (req, res) => {
   const auth = readAuthCookie(req);
   if (!auth) return ok(res, null);
   const user = await userQueries.getById(auth.userId);
   if (!user) return ok(res, null);
-  ok(res, { ...user, role: user.role || 'member' });
+  const role  = user.role || 'member';
+  const tabs  = role === 'owner'
+    ? ASSIGNABLE_TABS.slice()
+    : (await tabAccessQueries.listForUser(user.id)).filter(t => ASSIGNABLE_TABS.includes(t));
+  ok(res, { ...user, role, tabs });
 }));
 
 // Logout
@@ -454,6 +463,34 @@ app.put('/api/users/:id', wrap(async (req, res) => {
 app.delete('/api/users/:id', wrap(async (req, res) => {
   await userQueries.delete(req.params.id);
   ok(res, { deleted: true });
+}));
+
+// ── Admin: per-user sidebar tab access (owner-only) ─────────────────────────
+// GET returns each user's role + granted assignable tabs. Owners implicitly
+// see all assignable tabs — their `tabs` is reported as the full list for
+// display consistency, but the database row count stays zero.
+app.get('/api/admin/tab-access', requireOwner, wrap(async (req, res) => {
+  const [users, allGrants] = await Promise.all([
+    userQueries.getAll(),
+    tabAccessQueries.listAll(),
+  ]);
+  const out = users.map(u => {
+    const role = u.role || 'member';
+    const granted = (allGrants[u.id] || []).filter(t => ASSIGNABLE_TABS.includes(t));
+    return {
+      id: u.id, name: u.name, email: u.email, role,
+      tabs: role === 'owner' ? ASSIGNABLE_TABS.slice() : granted,
+    };
+  });
+  ok(res, { assignable_tabs: ASSIGNABLE_TABS, users: out });
+}));
+app.put('/api/admin/tab-access/:userId', requireOwner, wrap(async (req, res) => {
+  const tabs = Array.isArray(req.body?.tabs) ? req.body.tabs : null;
+  if (!tabs) return fail(res, 'tabs must be an array');
+  const bad = tabs.find(t => !ASSIGNABLE_TABS.includes(t));
+  if (bad) return fail(res, `unknown tab: ${bad}. Must be one of ${ASSIGNABLE_TABS.join(', ')}`);
+  const granted = await tabAccessQueries.set(req.params.userId, tabs);
+  ok(res, { user_id: +req.params.userId, tabs: granted });
 }));
 
 // ── Budget (owner-only) ─────────────────────────────────────────────────────
