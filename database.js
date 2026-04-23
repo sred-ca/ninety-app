@@ -1300,6 +1300,12 @@ if (USE_PG) {
       return rows[0] ?? null;
     },
     deleteLine: async (id) => pool.query('DELETE FROM budget_lines WHERE id=$1', [id]),
+    // Wipe an entire fiscal year's budget — used by the QB rebuild flow
+    // so we can start clean with accounts straight from the chart.
+    // Cascades to budget_cells via ON DELETE CASCADE on the FK.
+    deleteAllForFiscalYear: async (fiscalYear) => {
+      await pool.query('DELETE FROM budget_lines WHERE fiscal_year=$1', [fiscalYear]);
+    },
     upsertCell: async ({ line_id, period_date, budget_amount }) => {
       const { rows } = await pool.query(
         `INSERT INTO budget_cells (line_id, period_date, budget_amount)
@@ -2117,6 +2123,15 @@ if (USE_PG) {
     deleteLine: async (id) => {
       db.budget_lines = db.budget_lines.filter(l => l.id !== +id);
       db.budget_cells = db.budget_cells.filter(c => c.line_id !== +id);
+      persist(db);
+    },
+    deleteAllForFiscalYear: async (fiscalYear) => {
+      const kept = db.budget_lines.filter(l => l.fiscal_year !== fiscalYear);
+      const killedIds = new Set(
+        db.budget_lines.filter(l => l.fiscal_year === fiscalYear).map(l => l.id)
+      );
+      db.budget_lines = kept;
+      db.budget_cells = db.budget_cells.filter(c => !killedIds.has(c.line_id));
       persist(db);
     },
     upsertCell: async ({ line_id, period_date, budget_amount }) => {
