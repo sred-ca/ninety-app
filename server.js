@@ -710,45 +710,39 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
   const fiscalYear = (req.body && req.body.fiscal_year) || 'FY27';
   const fyNum = parseInt(String(fiscalYear).replace(/\D/g, ''), 10);
   if (!Number.isFinite(fyNum)) return fail(res, 'invalid fiscal_year');
-  // FY27 = May 2026 → Apr 2027; prior FY = May 2025 → Apr 2026.
-  const fy27StartYear = 2000 + fyNum - 1;
-  const priorStartDate = `${fy27StartYear - 1}-05-01`;
-  const priorEndDate   = `${fy27StartYear}-04-30`;
-  const FY27_MONTHS = Array.from({ length: 12 }, (_, i) => {
-    const m = (4 + i) % 12;
-    const y = fy27StartYear + Math.floor((4 + i) / 12);
-    return `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  });
-  const FY26_MONTHS = Array.from({ length: 12 }, (_, i) => {
-    const m = (4 + i) % 12;
-    const y = (fy27StartYear - 1) + Math.floor((4 + i) / 12);
-    return `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  });
 
-  // Per-account FY27 shaping. 'target' sets the annual total outright;
-  // 'factor' scales the prior-year total. Everything unlisted uses
-  // DEFAULT_FACTOR — modest growth with the business.
-  // These numbers come from the FY27 plan doc and the Jude/Logan pass
-  // on the earlier draft budget.
+  // Fiscal year = May year-1 → Apr year. For FY27, targetStartYear = 2026.
+  const targetStartYear = 2000 + fyNum - 1;
+  const targetStartDate = `${targetStartYear}-05-01`;
+  const targetEndDate   = `${targetStartYear + 1}-04-30`;
+  const priorStartDate  = `${targetStartYear - 1}-05-01`;
+  const priorEndDate    = `${targetStartYear}-04-30`;
+
+  const monthsFor = (startYear) => Array.from({ length: 12 }, (_, i) => {
+    const m = (4 + i) % 12;
+    const y = startYear + Math.floor((4 + i) / 12);
+    return `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  });
+  const TARGET_MONTHS = monthsFor(targetStartYear);
+  const PRIOR_MONTHS  = monthsFor(targetStartYear - 1);
+
+  // Per-account FY27 shaping — only applied when rebuilding FY27. Other
+  // fiscal years use DEFAULT_FACTOR × prior-year actuals so you get a
+  // "last year + 10%" reference budget rather than FY27-specific numbers.
   const FY27_TARGETS = {
-    // Income
     'Sales':                       { type: 'target', value: 1500000 },
-    // Expenses
     'Advertising/Promotion':       { type: 'target', value: 50000 },
     'Marketing':                   { type: 'target', value: 35000 },
     'Consulting expense':          { type: 'target', value: 15000 },
     'Wages':                       { type: 'target', value: 620000 },
     'Rent or Lease of Buildings':  { type: 'target', value: 60000 },
-    'Travel':                      { type: 'factor', value: 1.5 },   // Toronto prep
-    'Legal and professional fees': { type: 'factor', value: 1.3 },   // partnership agreements
+    'Travel':                      { type: 'factor', value: 1.5 },
+    'Legal and professional fees': { type: 'factor', value: 1.3 },
     'Software service costs':      { type: 'factor', value: 1.15 },
   };
   const DEFAULT_FACTOR = 1.10;
+  const applyTargets = fiscalYear === 'FY27';
 
-  // Heuristic: Income accounts are 'income', COGS type is 'cogs',
-  // 'Other Expense' is 'other', everything else is 'opex' unless the
-  // name suggests production-related ("wages", "consulting expense",
-  // "software service", "payroll").
   function sectionFor(account) {
     const type = String(account.type || '').toLowerCase();
     const name = String(account.name || '').toLowerCase();
@@ -759,58 +753,66 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
     return 'opex';
   }
 
-  // Scale a FY26 month array to an FY27 month array. If target.type is
-  // 'target' the FY27 total equals target.value; if 'factor', the FY27
-  // total is fy26_total × factor. Distribution preserves FY26 shape
-  // (so seasonality carries over). Returns an array of 12 rounded-integer
-  // amounts in FY27_MONTHS order.
-  function scaleMonthly(fy26Monthly, target) {
-    const fy26Total = fy26Monthly.reduce((a, b) => a + b, 0);
-    const fy27Total = target.type === 'target'
+  // Scale prior-year monthly array → fiscal-year monthly array. When prior
+  // has no data but a target is set, distribute flat. When there's no data
+  // AND no target, return null so the caller skips the line.
+  function scaleMonthly(priorMonthly, target) {
+    const priorTotal = priorMonthly.reduce((a, b) => a + b, 0);
+    const fyTotal = target.type === 'target'
       ? target.value
-      : fy26Total * target.value;
-    if (fy27Total <= 0) return null;
-    if (fy26Total === 0) {
-      // No prior-year shape; distribute flat with rounding drift on last month
-      const base = Math.round(fy27Total / 12);
+      : priorTotal * target.value;
+    if (fyTotal <= 0) return null;
+    if (priorTotal === 0) {
+      const base = Math.round(fyTotal / 12);
       const out = Array(12).fill(base);
-      out[out.length - 1] = Math.round(fy27Total) - base * 11;
+      out[out.length - 1] = Math.round(fyTotal) - base * 11;
       return out;
     }
-    const ratio = fy27Total / fy26Total;
-    return fy26Monthly.map(m => Math.round(m * ratio));
+    const ratio = fyTotal / priorTotal;
+    return priorMonthly.map(m => Math.round(m * ratio));
   }
 
   // ── Fetch QB data ────────────────────────────────────────────────
+  // Two P&L reports: target year (to decide which accounts are active NOW
+  // — handles chart-of-account renames cleanly) and prior year (used to
+  // seed budget values). When the target year has no activity (future-year
+  // rebuild before the year starts), fall back to prior-year accounts.
   const accounts = await qb.fetchAccounts(conn, qbConnectionQueries);
-  const report   = await qb.fetchProfitAndLoss(conn, qbConnectionQueries, priorStartDate, priorEndDate);
-  const parsed   = qb.parseProfitAndLoss(report);
+  const [targetReport, priorReport] = await Promise.all([
+    qb.fetchProfitAndLoss(conn, qbConnectionQueries, targetStartDate, targetEndDate),
+    qb.fetchProfitAndLoss(conn, qbConnectionQueries, priorStartDate,  priorEndDate),
+  ]);
+  const targetParsed = qb.parseProfitAndLoss(targetReport);
+  const priorParsed  = qb.parseProfitAndLoss(priorReport);
 
-  // Build accountId → monthly-amounts map from parsed P&L.
-  const fy26ByAccount = new Map();
-  for (const row of parsed.accountRows) {
-    fy26ByAccount.set(String(row.accountId), row);
-  }
+  const targetByAccount = new Map();
+  for (const row of targetParsed.accountRows) targetByAccount.set(String(row.accountId), row);
+  const priorByAccount = new Map();
+  for (const row of priorParsed.accountRows)  priorByAccount.set(String(row.accountId),  row);
 
-  // Filter to accounts we actually care about — Income / Expense / COGS /
-  // Other Income / Other Expense. Skip accounts with no prior-year activity
-  // (Balance Sheet accounts, dormant accounts). User can add them manually
-  // via Add line if they need a budget slot.
+  const monthlyFor = (row, months) => months.map(p => Number(row.amounts[p] || 0));
+  const useTargetAsAccountSource = targetParsed.accountRows
+    .some(r => monthlyFor(r, TARGET_MONTHS).some(x => x !== 0));
+
+  // Active accounts = the ones we care about for THIS fiscal year.
+  // Prefer the target-year P&L so chart renames (Payroll expenses →
+  // Wages) don't leak dead lines; fall back to prior-year if target is
+  // empty (e.g., rebuilding a future fiscal year).
   const RELEVANT_TYPES = new Set(['Income', 'Other Income', 'Expense', 'Other Expense', 'Cost of Goods Sold']);
   const candidates = accounts.filter(a => {
     if (!RELEVANT_TYPES.has(a.type)) return false;
-    const fy26 = fy26ByAccount.get(a.id);
-    const hasActivity = fy26 && fy26Monthly(fy26, FY26_MONTHS).some(x => x !== 0);
-    // Also include target accounts even if they had no FY26 activity —
-    // we want a budget line for Sales even if the account is renamed.
-    return hasActivity || FY27_TARGETS[a.name];
+    const sourceRow = useTargetAsAccountSource
+      ? targetByAccount.get(a.id)
+      : priorByAccount.get(a.id);
+    const months = useTargetAsAccountSource ? TARGET_MONTHS : PRIOR_MONTHS;
+    const hasActivity = sourceRow && monthlyFor(sourceRow, months).some(x => x !== 0);
+    // Always include target accounts (e.g., Sales) even if inactive this
+    // year — you want a budget slot ready. Only honor targets when we're
+    // rebuilding FY27.
+    return hasActivity || (applyTargets && FY27_TARGETS[a.name]);
   });
 
-  function fy26Monthly(row, months) {
-    return months.map(p => Number(row.amounts[p] || 0));
-  }
-
-  // Sort for display: income → cogs → opex → other, then by name.
+  // Sort: income → cogs → opex → other, then by name.
   const sectionOrder = { income: 0, cogs: 1, opex: 2, other: 3 };
   const sorted = candidates.slice().sort((a, b) => {
     const sa = sectionOrder[sectionFor(a)], sb = sectionOrder[sectionFor(b)];
@@ -827,13 +829,14 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
 
   for (const account of sorted) {
     const section = sectionFor(account);
-    const fy26Row = fy26ByAccount.get(account.id);
-    const monthly = fy26Row ? fy26Monthly(fy26Row, FY26_MONTHS) : Array(12).fill(0);
-    const target  = FY27_TARGETS[account.name] || { type: 'factor', value: DEFAULT_FACTOR };
+    const priorRow = priorByAccount.get(account.id);
+    const priorMonthly = priorRow ? monthlyFor(priorRow, PRIOR_MONTHS) : Array(12).fill(0);
+    const target = (applyTargets && FY27_TARGETS[account.name])
+      || { type: 'factor', value: DEFAULT_FACTOR };
 
-    const fy27Monthly = scaleMonthly(monthly, target);
-    if (!fy27Monthly) {
-      skipped.push({ id: account.id, name: account.name, reason: 'zero FY27 amount' });
+    const fyMonthly = scaleMonthly(priorMonthly, target);
+    if (!fyMonthly) {
+      skipped.push({ id: account.id, name: account.name, reason: 'zero target/actual for fiscal year' });
       continue;
     }
 
@@ -845,16 +848,16 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
       sort_order:    sortCountBySection[section] - 1,
       qb_account_id: account.id,
       notes:         target.type === 'target'
-        ? `FY27 target ${target.value.toLocaleString('en-US', {style:'currency',currency:'USD',maximumFractionDigits:0})} — from plan`
+        ? `${fiscalYear} target ${target.value.toLocaleString('en-US', {style:'currency',currency:'USD',maximumFractionDigits:0})} — from plan`
         : `FY${fyNum - 1} actuals × ${target.value} growth factor`,
     });
 
-    for (let i = 0; i < FY27_MONTHS.length; i++) {
-      if (!fy27Monthly[i]) continue;
+    for (let i = 0; i < TARGET_MONTHS.length; i++) {
+      if (!fyMonthly[i]) continue;
       await budgetQueries.upsertCell({
         line_id:       line.id,
-        period_date:   FY27_MONTHS[i],
-        budget_amount: fy27Monthly[i],
+        period_date:   TARGET_MONTHS[i],
+        budget_amount: fyMonthly[i],
       });
     }
 
@@ -863,16 +866,20 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
       category:       account.name,
       section,
       qb_account_id:  account.id,
-      fy26_total:     Math.round(monthly.reduce((a, b) => a + b, 0)),
-      fy27_total:     fy27Monthly.reduce((a, b) => a + b, 0),
+      prior_total:    Math.round(priorMonthly.reduce((a, b) => a + b, 0)),
+      fy_total:       fyMonthly.reduce((a, b) => a + b, 0),
       target_or_factor: target,
     });
   }
 
   ok(res, {
     fiscal_year:       fiscalYear,
+    target_start:      targetStartDate,
+    target_end:        targetEndDate,
     prior_start:       priorStartDate,
     prior_end:         priorEndDate,
+    account_source:    useTargetAsAccountSource ? 'target_year' : 'prior_year',
+    applied_targets:   applyTargets,
     created_lines:     createdLines,
     total_lines:       createdLines.length,
     skipped_accounts:  skipped,
