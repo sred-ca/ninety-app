@@ -1123,6 +1123,29 @@ if (USE_PG) {
       );
       return rows[0] ?? null;
     },
+
+    // Compact per-day density for a rolling window. Powers the Stella heatmap.
+    // Only includes days that have ≥1 call; empty days are implicit. For each
+    // day, reports total calls, total commitments from those calls, and how
+    // many are done (so the heatmap can color by completion if we want to).
+    getCalendar: async (user_id, days = 365) => {
+      const lim = Math.max(Math.min(+days || 365, 1095), 30);
+      const { rows } = await pool.query(
+        `SELECT cl.call_date::text AS date,
+                COUNT(DISTINCT cl.id)::int AS calls,
+                COUNT(cc.id)::int AS commitments,
+                COUNT(cc.id) FILTER (WHERE i.status='solved')::int AS completed
+         FROM coaching_calls cl
+         LEFT JOIN coaching_commitments cc ON cc.call_id = cl.id
+         LEFT JOIN issues i ON i.id = cc.issue_id
+         WHERE cl.user_id = $1
+           AND cl.call_date >= CURRENT_DATE - ($2 || ' days')::interval
+         GROUP BY cl.call_date
+         ORDER BY cl.call_date`,
+        [user_id, lim]
+      );
+      return { days: rows, window_days: lim };
+    },
   };
 
   const MILESTONE_Q = `
@@ -1949,6 +1972,27 @@ if (USE_PG) {
       c.call_date = call_date;
       persist(db);
       return { id: c.id, call_date: c.call_date };
+    },
+    getCalendar: async (user_id, days = 365) => {
+      const uid = +user_id;
+      const lim = Math.max(Math.min(+days || 365, 1095), 30);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - lim);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const byDate = {};
+      for (const c of db.coaching_calls) {
+        if (c.user_id !== uid) continue;
+        if (c.call_date < cutoffStr) continue;
+        if (!byDate[c.call_date]) byDate[c.call_date] = { date: c.call_date, calls: 0, commitments: 0, completed: 0 };
+        byDate[c.call_date].calls++;
+        const ccs = db.coaching_commitments.filter(x => x.call_id === c.id);
+        for (const cc of ccs) {
+          byDate[c.call_date].commitments++;
+          const i = db.issues.find(x => x.id === cc.issue_id);
+          if (i && i.status === 'solved') byDate[c.call_date].completed++;
+        }
+      }
+      return { days: Object.values(byDate).sort((a,b) => a.date.localeCompare(b.date)), window_days: lim };
     },
   };
 

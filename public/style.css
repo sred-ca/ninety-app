@@ -2909,3 +2909,53 @@ textarea { resize: vertical; min-height: 72px; }
 .map-qb-sync-summary { font-size: 12px; color: var(--text2); margin-top: 6px; }
 .map-qb-sync-warn { color: var(--yellow); }
 
+
+/* ── Stella Heatmap ───────────────────────────────────────────────── */
+.stella-heatmap-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 22px; margin-bottom: 24px;
+}
+.stella-hm-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px; gap: 12px; flex-wrap: wrap;
+}
+.stella-hm-header h2 { font-size: 14px; font-weight: 700; color: var(--text); }
+.stella-hm-right { display: flex; gap: 14px; align-items: center; }
+.stella-hm-scale {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--text2); font-size: 11px;
+}
+.stella-hm-scale .stella-hm-cell {
+  display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+}
+
+.stella-hm-scroll {
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.stella-hm-svg {
+  width: 100%; min-width: 760px; height: 130px;
+  display: block;
+}
+
+.stella-hm-cell {
+  fill: var(--surface2); stroke: transparent; stroke-width: 1;
+  transition: transform 80ms ease, fill 120ms ease;
+}
+.stella-hm-cell.lvl-0 { fill: #222230; }
+.stella-hm-cell.lvl-1 { fill: rgba(99,102,241,0.35); }
+.stella-hm-cell.lvl-2 { fill: rgba(99,102,241,0.55); }
+.stella-hm-cell.lvl-3 { fill: rgba(99,102,241,0.78); }
+.stella-hm-cell.lvl-4 { fill: var(--green); }
+.stella-hm-cell[data-has-call="1"] { cursor: pointer; }
+.stella-hm-cell[data-has-call="1"]:hover {
+  stroke: var(--text); stroke-width: 1;
+}
+.stella-hm-cell.is-today { stroke: var(--text); stroke-width: 1; }
+.stella-hm-cell.is-selected { stroke: var(--accent); stroke-width: 2; }
+
+.stella-hm-monthlabel,
+.stella-hm-daylabel {
+  fill: var(--text2); font-size: 10px;
+  font-family: var(--font);
+}

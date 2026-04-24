@@ -1138,6 +1138,9 @@ app.get('/api/coaching/calls/:id', requireCoachingFlag, wrap(async (req, res) =>
 app.get('/api/coaching/stats', requireCoachingFlag, wrap(async (req, res) => {
   ok(res, await coachingQueries.getStats(req.userId));
 }));
+app.get('/api/coaching/calendar', requireCoachingFlag, wrap(async (req, res) => {
+  ok(res, await coachingQueries.getCalendar(req.userId, +req.query.days || 365));
+}));
 app.get('/api/coaching/enabled', (req, res) => ok(res, { enabled: COACHING_ENABLED }));
 
 // Per-user Stella settings (session auth — each user manages their own).

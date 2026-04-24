@@ -2647,7 +2647,14 @@ function renderInsightsMeetings() {
    STELLA  (coaching tab — read-only view of daily-reflection calls)
    ════════════════════════════════════════════════════════════════════ */
 
-const stellaState = { offset: 0, pageSize: 20, hasMore: false, filterMissed: false };
+const stellaState = {
+  offset: 0, pageSize: 20, hasMore: false, filterMissed: false,
+  // When a heatmap cell is clicked we stash its date here; loadStella then
+  // re-heroes that day's call instead of the latest.
+  heroDate: null,
+  // Cache of recent calls (latest page) for hero lookups without refetching.
+  recentCalls: [],
+};
 
 async function loadStella() {
   qs('#stella-settings-gate').style.display = 'none';
@@ -2675,18 +2682,166 @@ async function loadStella() {
   }
 
   try {
-    const [stats, page] = await Promise.all([
+    const [stats, page, calendar] = await Promise.all([
       api.get('/api/coaching/stats'),
       api.get(`/api/coaching/calls?limit=${stellaState.pageSize}&offset=${stellaState.offset}`),
+      api.get('/api/coaching/calendar?days=365'),
     ]);
     renderStellaStats(stats);
-    renderStellaHero(page.calls[0] || null);
+    stellaState.recentCalls = page.calls;
+    renderStellaHeatmap(calendar);
+    // Pick hero: if a heatmap cell was selected, use that day. Otherwise latest.
+    const heroCall = (stellaState.heroDate)
+      ? await pickHeroCall(stellaState.heroDate, page.calls)
+      : (page.calls[0] || null);
+    renderStellaHero(heroCall);
     stellaState.hasMore = !!page.has_more;
-    renderStellaTimeline(page.calls.slice(1));
+    renderStellaTimeline(page.calls.slice(page.calls[0] === heroCall ? 1 : 0));
     renderStellaPager();
   } catch (e) {
     qs('#stella-timeline').innerHTML = `<div class="empty-state"><p>Couldn't load Stella data: ${esc(e.message)}</p></div>`;
   }
+}
+
+// Fetch a call for a given date — try the recent cache first, fall back to
+// scanning older pages if the user picked a day off-screen.
+async function pickHeroCall(isoDate, recent) {
+  const match = (c) => String(c.call_date).slice(0, 10) === isoDate;
+  const cached = recent.find(match);
+  if (cached) return cached;
+  // Slow path: widen the window until we find the day or exhaust history.
+  for (let offset = 0; offset < 400; offset += 100) {
+    const p = await api.get(`/api/coaching/calls?limit=100&offset=${offset}`);
+    const hit = p.calls.find(match);
+    if (hit) return hit;
+    if (!p.has_more) break;
+  }
+  return null;
+}
+
+// Render a GitHub-contributions-style grid for the last N days. Cells are
+// weeks (columns) × days-of-week (rows), walking backwards from today.
+function renderStellaHeatmap(calendar) {
+  const wrap = qs('#stella-heatmap-wrap');
+  if (!calendar || !Array.isArray(calendar.days)) { wrap.innerHTML = ''; return; }
+  const byDate = Object.fromEntries((calendar.days || []).map(d => [d.date, d]));
+
+  // Build an ordered list of dates ending today, going back 52 weeks + partial.
+  // Align so the last column's rightmost row is today.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // Walk back so the grid starts on a Sunday 52 weeks + (todayDow) days ago.
+  const totalDays = 52 * 7 + (today.getDay() + 1); // +1 so today is included
+  const start = new Date(today);
+  start.setDate(start.getDate() - (totalDays - 1));
+  // Snap to previous Sunday so rows line up.
+  start.setDate(start.getDate() - start.getDay());
+
+  const days = [];
+  const cur = new Date(start);
+  while (cur <= today) {
+    const iso = cur.toISOString().slice(0, 10);
+    days.push({ iso, d: new Date(cur), info: byDate[iso] || null });
+    cur.setDate(cur.getDate() + 1);
+  }
+  // Group into weeks (columns), 7 per column
+  const weeks = [];
+  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+
+  // Month labels: print the month name at the first week whose Sunday is in
+  // that month (and only when it changes).
+  let lastMonth = -1;
+  const monthLabels = weeks.map((w, idx) => {
+    const first = w[0];
+    const m = first.d.getMonth();
+    if (m !== lastMonth) {
+      lastMonth = m;
+      return { idx, label: first.d.toLocaleDateString(undefined, { month: 'short' }) };
+    }
+    return null;
+  }).filter(Boolean);
+
+  const intensity = (info) => {
+    if (!info || !info.calls) return 0;
+    if (info.commitments === 0) return 1;
+    // Gradient by commitment-completion
+    const r = info.completed / Math.max(info.commitments, 1);
+    if (r >= 1) return 4;
+    if (r >= 0.5) return 3;
+    return 2;
+  };
+
+  const todayIso = today.toISOString().slice(0, 10);
+  const selectedIso = stellaState.heroDate;
+
+  const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+
+  const cells = weeks.map((w, col) => {
+    const cellRows = [0, 1, 2, 3, 4, 5, 6].map(row => {
+      const cell = w[row];
+      if (!cell) return '<rect class="stella-hm-cell stella-hm-empty" x="0" y="0" width="0" height="0"/>';
+      const lvl   = intensity(cell.info);
+      const isToday = cell.iso === todayIso;
+      const isSel   = cell.iso === selectedIso;
+      const hasCall = !!cell.info;
+      const tt = cell.info
+        ? `${formatDateLong(cell.iso)} · ${cell.info.calls} call${cell.info.calls===1?'':'s'} · ${cell.info.completed}/${cell.info.commitments} done`
+        : `${formatDateLong(cell.iso)} · no call`;
+      const x = col * 14, y = row * 14;
+      return `<rect class="stella-hm-cell lvl-${lvl}${isToday ? ' is-today' : ''}${isSel ? ' is-selected' : ''}"
+                data-date="${cell.iso}" ${hasCall ? 'data-has-call="1"' : ''}
+                x="${x}" y="${y}" width="11" height="11" rx="2" ry="2">
+                <title>${esc(tt)}</title>
+              </rect>`;
+    }).join('');
+    return cellRows;
+  }).join('');
+
+  const gridW = weeks.length * 14 + 2;
+  const gridH = 7 * 14 + 2;
+
+  const labelsHtml = monthLabels.map(m =>
+    `<text class="stella-hm-monthlabel" x="${m.idx * 14}" y="10">${esc(m.label)}</text>`
+  ).join('');
+  const dayLabelsHtml = dayLabels.map((lbl, i) =>
+    lbl ? `<text class="stella-hm-daylabel" x="-6" y="${i * 14 + 9}" text-anchor="end">${esc(lbl)}</text>` : ''
+  ).join('');
+
+  const sel = stellaState.heroDate
+    ? `<button class="btn btn-ghost btn-small" id="stella-hm-clear">✕ Clear (${formatDateShort(stellaState.heroDate)})</button>`
+    : '';
+
+  wrap.innerHTML = `
+    <div class="stella-hm-header">
+      <h2>Your year with Stella</h2>
+      <div class="stella-hm-right">
+        ${sel}
+        <span class="stella-hm-scale">Less
+          <span class="stella-hm-cell lvl-0"></span>
+          <span class="stella-hm-cell lvl-1"></span>
+          <span class="stella-hm-cell lvl-2"></span>
+          <span class="stella-hm-cell lvl-3"></span>
+          <span class="stella-hm-cell lvl-4"></span>
+        More</span>
+      </div>
+    </div>
+    <div class="stella-hm-scroll">
+      <svg viewBox="-24 -16 ${gridW + 28} ${gridH + 22}" preserveAspectRatio="xMinYMin meet" class="stella-hm-svg">
+        <g>${labelsHtml}</g>
+        <g>${dayLabelsHtml}</g>
+        <g transform="translate(0,0)">${cells}</g>
+      </svg>
+    </div>
+  `;
+
+  wrap.querySelectorAll('[data-has-call="1"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const d = el.getAttribute('data-date');
+      stellaState.heroDate = (stellaState.heroDate === d) ? null : d;
+      loadStella();
+    });
+  });
+  const clearBtn = qs('#stella-hm-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => { stellaState.heroDate = null; loadStella(); });
 }
 
 async function openStellaSettings() {
