@@ -336,6 +336,27 @@ app.get('/api/coaching/enabled-users', requireCoachingFlag, requireAdminKey, wra
   ok(res, await coachingQueries.listEnabledUsers());
 }));
 
+// Admin-scoped stats + recent-call listing for a specific user. Operational
+// diagnostic endpoint (check whether a user's calls landed, what their streak
+// is computed as, etc.). Bypasses the enabled check used by write paths so
+// operators can inspect disabled/stale accounts.
+app.get('/api/coaching/admin/user-state', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const userId = +(req.headers['x-coaching-user-id'] || req.query.user_id || 0);
+  if (!userId) return fail(res, 'X-Coaching-User-Id (or ?user_id=) is required');
+  const user = await userQueries.getById(userId);
+  if (!user) return fail(res, 'Unknown user', 404);
+  const [stats, recent] = await Promise.all([
+    coachingQueries.getStats(userId),
+    coachingQueries.listCalls(userId, 20, 0),
+  ]);
+  ok(res, {
+    user: { id: user.id, name: user.name, email: user.email,
+            coaching_enabled: user.coaching_enabled, coaching_phone: user.coaching_phone },
+    stats,
+    recent,
+  });
+}));
+
 // Pre-call builder pushes each user's rendered Stella system prompt here.
 // The prompt is a single string (the full system message), built per-user
 // from their markdown journal / commitments / wins / themes / personality.
