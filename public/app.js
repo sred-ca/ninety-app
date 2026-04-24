@@ -2156,11 +2156,13 @@ async function loadMy90() {
   const in90Str = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
   const uid = state.currentUser?.id;
 
-  const [allRocks, allIssues, allMeetings] = await Promise.all([
+  const [allRocks, allIssues, allMeetings, vto] = await Promise.all([
     api.get('/api/rocks?quarter=' + encodeURIComponent(currentQuarter())),
     api.get('/api/issues'),
     api.get('/api/meetings'),
+    api.get('/api/vto').catch(() => null),  // V/TO is optional; render without it on failure
   ]);
+  state.my90Vto = vto;
 
   state.my90Rocks    = allRocks.filter(r => r.owner_id === uid);
   state.my90Issues   = allIssues.filter(i =>
@@ -2188,6 +2190,85 @@ function renderMy90() {
   function goToView(view) {
     const btn = qs(`.nav-item[data-view="${view}"]`);
     if (btn) btn.click();
+  }
+
+  // ── Vision card ───────────────────────────────────────────────────
+  // Pulls Core Values + Core Focus from the V/TO row. Public-readable
+  // signal of who we are; everything else V/TO stays private to that tab.
+  const vto = state.my90Vto;
+  const vals = (vto && vto.core_values) || [];
+  const cause = vto && vto.core_focus_purpose;
+  const niche = vto && vto.core_focus_niche;
+  if (vals.length || cause || niche) {
+    const visionBox = document.createElement('div');
+    visionBox.className = 'card my90-box my90-box--full my90-vision';
+    const valuesHtml = vals.length
+      ? `<div class="my90-vision-values">${vals.map(v => `
+          <div class="my90-vision-value">
+            <div class="my90-vision-value-label">${esc(v.label || '')}</div>
+            ${v.description ? `<div class="my90-vision-value-desc">${esc(v.description)}</div>` : ''}
+          </div>`).join('')}</div>`
+      : '';
+    const focusHtml = (cause || niche) ? `
+      <div class="my90-vision-focus">
+        ${cause ? `<div class="my90-vision-focus-line"><span class="my90-vision-focus-label">Cause:</span> ${esc(cause)}</div>` : ''}
+        ${niche ? `<div class="my90-vision-focus-line"><span class="my90-vision-focus-label">Niche:</span> ${esc(niche)}</div>` : ''}
+      </div>` : '';
+    visionBox.innerHTML = `
+      <div class="my90-box-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
+          <circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+        </svg>
+        <span class="my90-box-title">Who we are</span>
+        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO</button>
+      </div>
+      <div class="my90-box-body my90-vision-body">
+        ${valuesHtml}
+        ${focusHtml}
+      </div>
+    `;
+    grid.appendChild(visionBox);
+    visionBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('vto'));
+  }
+
+  // ── FY27 Goals card ───────────────────────────────────────────────
+  // Reads one_year_goals from V/TO. Forward-compatible: when we add
+  // rocks.goal_id and issues.rock_id later, this card grows progress
+  // bars (rocks done / total + to-dos done / total per goal).
+  const goals = (vto && vto.one_year_goals) || [];
+  if (goals.length) {
+    const fyLabel = vto.one_year_future_date
+      ? `to ${new Date(vto.one_year_future_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`
+      : 'this year';
+    const goalsBox = document.createElement('div');
+    goalsBox.className = 'card my90-box my90-box--full my90-goals';
+    goalsBox.innerHTML = `
+      <div class="my90-box-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+        </svg>
+        <span class="my90-box-title">Annual Goals</span>
+        <span class="my90-box-quarter">${fyLabel}</span>
+        <span class="my90-box-count">${goals.length}</span>
+        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO</button>
+      </div>
+      <div class="my90-box-body my90-goals-body">
+        ${goals.map((g, i) => {
+          const owner = g.owner_id ? state.users.find(u => u.id === g.owner_id) : null;
+          const ownerHtml = owner
+            ? `<span class="my90-goal-owner">${esc(owner.name.split(' ')[0])}</span>`
+            : '';
+          return `
+            <div class="my90-goal">
+              <div class="my90-goal-num">${i + 1}</div>
+              <div class="my90-goal-text">${esc(g.text || '')}</div>
+              ${ownerHtml}
+            </div>`;
+        }).join('')}
+      </div>
+    `;
+    grid.appendChild(goalsBox);
+    goalsBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('vto'));
   }
 
   // ── Box 1: My Rocks ───────────────────────────────────────────────
