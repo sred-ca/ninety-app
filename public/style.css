@@ -2873,6 +2873,30 @@ textarea { resize: vertical; min-height: 72px; }
 .budget-cell-actual.favorable   { color: var(--green); }
 .budget-cell-actual.unfavorable { color: var(--red); }
 
+/* Read-only budget display used inside subtotals, row totals, and the
+   Operating Profit row (where budgets aren't editable). Matches the
+   size/alignment of the input-version so the two layouts stay aligned. */
+.budget-cell-budget-display {
+  text-align: right;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 8px;
+}
+
+/* Operating profit row — emphasize. Double border + slightly stronger bg. */
+.budget-op-row td {
+  background: var(--surface3);
+  border-top: 2px solid var(--border2);
+  border-bottom: 2px solid var(--border2);
+}
+.budget-op-row .budget-td-category {
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
 /* Map QB modal */
 .map-qb-table { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
 .map-qb-group-head {

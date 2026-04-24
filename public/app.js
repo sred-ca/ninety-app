@@ -3572,32 +3572,60 @@ function parseMoneyInput(str) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-// Classify a budget cell against its line's section so the UI can paint
-// the actual amount green/red. Good direction is section-specific:
+// Classify any (budget, actual) pair against a section so the UI can paint
+// it green/red. Good direction is section-specific:
 //   Income  → higher is better (actual ≥ 90% of budget = favorable)
 //   Expense → lower  is better (actual ≤ 110% of budget = favorable)
-// Within ±10% either way counts as on-plan (still green — matches the
-// "within 10% = green" rule from the ask). Returns null when there's no
-// actual to color (future month, pre-sync) or both sides are zero.
+// Within ±10% either way counts as on-plan (still green). Returns null
+// when there's nothing meaningful to compare (no actual yet, or both zero).
+// Operating-profit-style totals use section='income' — higher is better.
+function variancePaintRaw(section, budget, actual) {
+  if (actual == null) return null;
+  const b = Number(budget) || 0;
+  const a = Number(actual) || 0;
+  if (b === 0 && a === 0) return null;
+  if (b === 0) return 'unfavorable'; // unbudgeted spend / unbudgeted revenue both flag
+  const isRevenue = section === 'income';
+  if (isRevenue) return a < b * 0.9  ? 'unfavorable' : 'favorable';
+  return                a > b * 1.1 ? 'unfavorable' : 'favorable';
+}
 function variancePaint(line, cell) {
-  if (!cell || cell.actual_amount == null) return null;
-  const budget = Number(cell.budget_amount) || 0;
-  const actual = Number(cell.actual_amount) || 0;
-  if (budget === 0 && actual === 0) return null;
-  if (budget === 0) return 'unfavorable'; // unbudgeted spend / unbudgeted revenue both flag
-  const isRevenue = line.section === 'income';
-  if (isRevenue) return actual < budget * 0.9  ? 'unfavorable' : 'favorable';
-  return                actual > budget * 1.1 ? 'unfavorable' : 'favorable';
+  if (!cell) return null;
+  return variancePaintRaw(line.section, cell.budget_amount, cell.actual_amount);
+}
+function varianceTitleRaw(budget, actual, sourceHint) {
+  const src = sourceHint ? `Actual source: ${sourceHint}` : '';
+  if (actual == null) return src;
+  const b = Number(budget) || 0;
+  if (b === 0) return `${src}${src ? ' · ' : ''}No budget set`;
+  const pct = ((Number(actual) - b) / b) * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${src}${src ? ' · ' : ''}Variance ${sign}${pct.toFixed(1)}% vs budget`;
 }
 function varianceTitle(line, cell) {
   if (!cell) return '';
-  const src = cell.actual_source ? `Actual source: ${cell.actual_source}` : '';
-  if (cell.actual_amount == null) return src;
-  const budget = Number(cell.budget_amount) || 0;
-  if (budget === 0) return `${src}${src ? ' · ' : ''}No budget set`;
-  const pct = ((Number(cell.actual_amount) - budget) / budget) * 100;
-  const sign = pct > 0 ? '+' : '';
-  return `${src}${src ? ' · ' : ''}Variance ${sign}${pct.toFixed(1)}% vs budget`;
+  return varianceTitleRaw(cell.budget_amount, cell.actual_amount, cell.actual_source);
+}
+
+// Two-line static cell (budget on top, actual underneath, variance-painted).
+// Used for section subtotals, row totals, and the Operating Profit row —
+// anywhere we need to display budget vs actual without editability.
+// hasActual controls whether the actual slot shows a number or "—".
+function dualCell(section, budget, actual, hasActual) {
+  const wrap = document.createElement('div'); wrap.className = 'budget-cell';
+  const b = document.createElement('div'); b.className = 'budget-cell-budget-display';
+  b.textContent = budget ? fmtMoney(budget) : '—';
+  const a = document.createElement('div'); a.className = 'budget-cell-actual';
+  if (hasActual) {
+    a.textContent = fmtMoney(actual);
+    const paint = variancePaintRaw(section, budget, actual);
+    if (paint) a.classList.add(paint);
+    a.title = varianceTitleRaw(budget, actual, '');
+  } else {
+    a.textContent = '—';
+  }
+  wrap.append(b, a);
+  return wrap;
 }
 
 async function loadBudget() {
@@ -3964,12 +3992,16 @@ function renderBudgetBody(months) {
       tr.appendChild(nameTd);
 
       // Monthly cells
-      let total = 0;
+      let rowBudgetTotal = 0, rowActualTotal = 0, rowHasActual = false;
       months.forEach(m => {
         const td = document.createElement('td'); td.className = 'budget-td-month';
         const cell = cellsByPeriod[m.period] || null;
         const budgetVal = cell ? Number(cell.budget_amount) : 0;
-        total += budgetVal;
+        rowBudgetTotal += budgetVal;
+        if (cell && cell.actual_amount != null) {
+          rowActualTotal += Number(cell.actual_amount);
+          rowHasActual = true;
+        }
 
         const wrap = document.createElement('div'); wrap.className = 'budget-cell';
         const bInput = document.createElement('input');
@@ -4004,9 +4036,9 @@ function renderBudgetBody(months) {
         tr.appendChild(td);
       });
 
-      // Total
+      // Row total: budget sum + actual sum, variance-painted.
       const totalTd = document.createElement('td'); totalTd.className = 'budget-td-total';
-      totalTd.textContent = total ? fmtMoney(total) : '—';
+      totalTd.appendChild(dualCell(line.section, rowBudgetTotal, rowActualTotal, rowHasActual));
       tr.appendChild(totalTd);
 
       // Actions
@@ -4025,29 +4057,78 @@ function renderBudgetBody(months) {
       body.appendChild(tr);
     });
 
-    // Section subtotal row
+    // Section subtotal row: budget + actual per month + total, painted.
     const sub = document.createElement('tr');
     sub.className = 'budget-subtotal-row';
-    const subName = document.createElement('td'); subName.className = 'budget-td-category'; subName.textContent = `${BUDGET_SECTION_LABELS[section]} subtotal`;
+    const subName = document.createElement('td');
+    subName.className = 'budget-td-category';
+    subName.textContent = `${BUDGET_SECTION_LABELS[section]} subtotal`;
     sub.appendChild(subName);
-    let secTotal = 0;
+
+    let secBudgetTotal = 0, secActualTotal = 0, secHasActual = false;
     months.forEach(m => {
-      let monthSum = 0;
+      let monthBudget = 0, monthActual = 0, monthHasActual = false;
       lines.forEach(l => {
         const c = state.budget.cells.find(x => x.line_id === l.id && String(x.period_date).slice(0, 10) === m.period);
-        if (c) monthSum += Number(c.budget_amount) || 0;
+        if (!c) return;
+        monthBudget += Number(c.budget_amount) || 0;
+        if (c.actual_amount != null) {
+          monthActual += Number(c.actual_amount);
+          monthHasActual = true;
+        }
       });
-      secTotal += monthSum;
+      secBudgetTotal += monthBudget;
+      if (monthHasActual) { secActualTotal += monthActual; secHasActual = true; }
       const td = document.createElement('td'); td.className = 'budget-td-month budget-td-subtotal';
-      td.textContent = monthSum ? fmtMoney(monthSum) : '—';
+      td.appendChild(dualCell(section, monthBudget, monthActual, monthHasActual));
       sub.appendChild(td);
     });
-    const subTotalTd = document.createElement('td'); subTotalTd.className = 'budget-td-total budget-td-subtotal';
-    subTotalTd.textContent = secTotal ? fmtMoney(secTotal) : '—';
+    const subTotalTd = document.createElement('td');
+    subTotalTd.className = 'budget-td-total budget-td-subtotal';
+    subTotalTd.appendChild(dualCell(section, secBudgetTotal, secActualTotal, secHasActual));
     sub.appendChild(subTotalTd);
     sub.appendChild(document.createElement('td'));
     body.appendChild(sub);
   });
+
+  // ── Operating Profit row ────────────────────────────────────────
+  // Income - COGS - OpEx - Other, computed per month from every cell.
+  // Paints with income direction (higher = better) since OP is the
+  // bottom line you want to maximize.
+  const opRow = document.createElement('tr');
+  opRow.className = 'budget-subtotal-row budget-op-row';
+  const opName = document.createElement('td');
+  opName.className = 'budget-td-category';
+  opName.textContent = 'Operating profit';
+  opRow.appendChild(opName);
+
+  let opBudgetTotal = 0, opActualTotal = 0, opHasActual = false;
+  const SECTION_SIGN = { income: 1, cogs: -1, opex: -1, other: -1 };
+  months.forEach(m => {
+    let monthOpBudget = 0, monthOpActual = 0, monthOpHasActual = false;
+    state.budget.lines.forEach(l => {
+      const sign = SECTION_SIGN[l.section];
+      if (sign == null) return;
+      const c = state.budget.cells.find(x => x.line_id === l.id && String(x.period_date).slice(0, 10) === m.period);
+      if (!c) return;
+      monthOpBudget += sign * (Number(c.budget_amount) || 0);
+      if (c.actual_amount != null) {
+        monthOpActual += sign * Number(c.actual_amount);
+        monthOpHasActual = true;
+      }
+    });
+    opBudgetTotal += monthOpBudget;
+    if (monthOpHasActual) { opActualTotal += monthOpActual; opHasActual = true; }
+    const td = document.createElement('td'); td.className = 'budget-td-month budget-td-subtotal';
+    td.appendChild(dualCell('income', monthOpBudget, monthOpActual, monthOpHasActual));
+    opRow.appendChild(td);
+  });
+  const opTotalTd = document.createElement('td');
+  opTotalTd.className = 'budget-td-total budget-td-subtotal';
+  opTotalTd.appendChild(dualCell('income', opBudgetTotal, opActualTotal, opHasActual));
+  opRow.appendChild(opTotalTd);
+  opRow.appendChild(document.createElement('td'));
+  body.appendChild(opRow);
 }
 
 function wireBudgetControls() {
