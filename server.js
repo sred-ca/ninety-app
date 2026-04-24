@@ -370,6 +370,22 @@ app.get('/api/coaching/admin/user-state', requireCoachingFlag, requireAdminKey, 
   });
 }));
 
+// Admin V/TO update (admin-key auth, no session). Mirrors PUT /api/vto.
+// Used for bulk content updates from CLI / external tooling.
+app.put('/api/admin/vto', requireAdminKey, wrap(async (req, res) => {
+  ok(res, await vtoQueries.update(req.body || {}));
+}));
+
+// Admin create-team-issue (admin-key auth, no session). Mirrors POST /api/team-issues.
+app.post('/api/admin/team-issues', requireAdminKey, wrap(async (req, res) => {
+  const { title, description, horizon, owner_id } = req.body || {};
+  if (!title) return fail(res, 'title is required');
+  if (horizon && !['short_term','long_term'].includes(horizon)) {
+    return fail(res, 'horizon must be short_term or long_term');
+  }
+  ok(res, await teamIssueQueries.create({ title, description, owner_id, horizon }));
+}));
+
 // Pre-call builder pushes each user's rendered Stella system prompt here.
 // The prompt is a single string (the full system message), built per-user
 // from their markdown journal / commitments / wins / themes / personality.
