@@ -877,14 +877,18 @@ if (USE_PG) {
   const coachingQueries = {
     // Creates a coaching call + its commitments (as issues, source='coaching', private=true)
     // atomically. Returns { call_id, issue_ids }.
-    createCall: async ({ user_id, summary, gratitude, transcript, commitments }) => {
+    // If call_date is passed (YYYY-MM-DD), it's used as-is. Otherwise falls back
+    // to CURRENT_DATE in the server's timezone (UTC on Vercel), which can bleed
+    // into the caller's tomorrow for late-evening calls — so clients should pass
+    // the caller-local journal date explicitly.
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date }) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
         const call = await client.query(
-          `INSERT INTO coaching_calls (user_id, summary, gratitude, transcript)
-           VALUES ($1,$2,$3,$4) RETURNING id, call_date, created_at`,
-          [user_id, summary || null, gratitude || null, transcript || null]
+          `INSERT INTO coaching_calls (user_id, summary, gratitude, transcript, call_date)
+           VALUES ($1,$2,$3,$4, COALESCE($5::date, CURRENT_DATE)) RETURNING id, call_date, created_at`,
+          [user_id, summary || null, gratitude || null, transcript || null, call_date || null]
         );
         const callId = call.rows[0].id;
         // Default due: tomorrow 23:59 in server TZ
@@ -1110,6 +1114,14 @@ if (USE_PG) {
          ORDER BY id`
       );
       return rows;
+    },
+
+    updateCallDate: async (call_id, call_date) => {
+      const { rows } = await pool.query(
+        'UPDATE coaching_calls SET call_date=$1 WHERE id=$2 RETURNING id, call_date',
+        [call_date, call_id]
+      );
+      return rows[0] ?? null;
     },
   };
 
@@ -1775,9 +1787,9 @@ if (USE_PG) {
   persist(db);
 
   const coachingQueries = {
-    createCall: async ({ user_id, summary, gratitude, transcript, commitments }) => {
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date }) => {
       const uid = +user_id;
-      const callDate = new Date().toISOString().slice(0,10);
+      const callDate = call_date || new Date().toISOString().slice(0,10);
       const call = { id: nextId('coaching_calls'), user_id: uid, call_date: callDate,
         summary: summary || null, gratitude: gratitude || null, transcript: transcript || null,
         created_at: nowStr() };
@@ -1930,6 +1942,13 @@ if (USE_PG) {
       return db.users
         .filter(u => u.coaching_enabled)
         .map(u => ({ id: u.id, name: u.name, email: u.email, coaching_phone: u.coaching_phone }));
+    },
+    updateCallDate: async (call_id, call_date) => {
+      const c = db.coaching_calls.find(x => x.id === +call_id);
+      if (!c) return null;
+      c.call_date = call_date;
+      persist(db);
+      return { id: c.id, call_date: c.call_date };
     },
   };
 

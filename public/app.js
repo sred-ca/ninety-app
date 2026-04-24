@@ -2880,15 +2880,23 @@ function openStellaTranscript(call) {
   el.addEventListener('click', (ev) => { if (ev.target === el) close(); });
 }
 
+// DB ships call_date as either 'YYYY-MM-DD' (from Postgres DATE type) or a
+// full timestamp. Extract just the date portion and format in UTC so we render
+// the date the server stored, not whatever the browser's local TZ shifts it to.
+function _dateOnly(d) {
+  if (!d) return null;
+  const s = String(d);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+}
 function formatDateShort(d) {
-  if (!d) return '';
-  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const dt = _dateOnly(d); if (!dt) return '';
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 function formatDateLong(d) {
-  if (!d) return '';
-  const dt = new Date(d + (d.length === 10 ? 'T00:00:00' : ''));
-  return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const dt = _dateOnly(d); if (!dt) return '';
+  return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 

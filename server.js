@@ -306,10 +306,13 @@ async function resolveCoachingTarget(req, res) {
 
 app.post('/api/coaching/calls', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
   const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
-  const { summary, gratitude, transcript, commitments } = req.body || {};
+  const { summary, gratitude, transcript, commitments, call_date } = req.body || {};
   if (!Array.isArray(commitments)) return fail(res, 'commitments must be an array');
+  if (call_date && !/^\d{4}-\d{2}-\d{2}$/.test(call_date)) {
+    return fail(res, 'call_date must be YYYY-MM-DD');
+  }
   ok(res, await coachingQueries.createCall({
-    user_id: userId, summary, gratitude, transcript, commitments,
+    user_id: userId, summary, gratitude, transcript, commitments, call_date,
   }));
 }));
 
@@ -334,6 +337,16 @@ app.get('/api/coaching/user-by-phone', requireCoachingFlag, requireAdminKey, wra
 // and build per-user prompts.
 app.get('/api/coaching/enabled-users', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
   ok(res, await coachingQueries.listEnabledUsers());
+}));
+
+// Admin: correct a stored call_date. Needed because early calls stored UTC
+// CURRENT_DATE which bleeds into the caller's tomorrow for late-evening calls.
+app.put('/api/coaching/admin/calls/:id/date', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+  const { call_date } = req.body || {};
+  if (!call_date || !/^\d{4}-\d{2}-\d{2}$/.test(call_date)) {
+    return fail(res, 'call_date (YYYY-MM-DD) is required');
+  }
+  ok(res, await coachingQueries.updateCallDate(req.params.id, call_date));
 }));
 
 // Admin-scoped stats + recent-call listing for a specific user. Operational
