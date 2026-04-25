@@ -2672,13 +2672,15 @@ function renderInsightsTodos() {
 
   destroyChart('todos-owner');
   const om = {};
-  filtered.forEach(i => { const n = i.owner_name || 'Unassigned'; om[n] = (om[n] || 0) + 1; });
+  filtered
+    .filter(i => i.status === 'solved')
+    .forEach(i => { const n = i.owner_name || 'Unassigned'; om[n] = (om[n] || 0) + 1; });
   const oNames = Object.keys(om);
   state.insightCharts['todos-owner'] = new Chart(qs('#chart-todos-owner').getContext('2d'), {
     type: 'bar',
     data: { labels: oNames,
-      datasets: [{ label: 'Open To-Dos', data: oNames.map(n => om[n]),
-        backgroundColor: '#6366f1', hoverBackgroundColor: '#7c7ff5', borderRadius: 4, borderSkipped: false }] },
+      datasets: [{ label: 'Solved To-Dos', data: oNames.map(n => om[n]),
+        backgroundColor: '#10b981', hoverBackgroundColor: '#34d399', borderRadius: 4, borderSkipped: false }] },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } },
       scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true },
                 y: { grid: { color: 'transparent' }, ticks: { color: '#9494b0' } } } },
