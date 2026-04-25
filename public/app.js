@@ -2202,30 +2202,28 @@ function renderMy90() {
   if (vals.length || cause || niche) {
     const visionBox = document.createElement('div');
     visionBox.className = 'card my90-box my90-box--full my90-vision';
-    const valuesHtml = vals.length
-      ? `<div class="my90-vision-values">${vals.map(v => `
+    // Lead with the Cause as a centered statement — it's the WHY.
+    // Then values as paired blocks. Niche moves into a secondary line below.
+    const causeBlock = cause ? `
+      <div class="my90-vision-cause">
+        <div class="my90-vision-cause-text">${esc(cause)}</div>
+        ${niche ? `<div class="my90-vision-niche-text">${esc(niche)}</div>` : ''}
+      </div>` : '';
+    const valuesBlock = vals.length ? `
+      <div class="my90-vision-values">
+        ${vals.map(v => `
           <div class="my90-vision-value">
             <div class="my90-vision-value-label">${esc(v.label || '')}</div>
             ${v.description ? `<div class="my90-vision-value-desc">${esc(v.description)}</div>` : ''}
-          </div>`).join('')}</div>`
-      : '';
-    const focusHtml = (cause || niche) ? `
-      <div class="my90-vision-focus">
-        ${cause ? `<div class="my90-vision-focus-line"><span class="my90-vision-focus-label">Cause:</span> ${esc(cause)}</div>` : ''}
-        ${niche ? `<div class="my90-vision-focus-line"><span class="my90-vision-focus-label">Niche:</span> ${esc(niche)}</div>` : ''}
+          </div>`).join('')}
       </div>` : '';
     visionBox.innerHTML = `
-      <div class="my90-box-header">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="my90-box-icon">
-          <circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
-        </svg>
-        <span class="my90-box-title">Who we are</span>
-        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO</button>
+      <div class="my90-vision-header">
+        <span class="my90-vision-eyebrow">Who we are</span>
+        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO →</button>
       </div>
-      <div class="my90-box-body my90-vision-body">
-        ${valuesHtml}
-        ${focusHtml}
-      </div>
+      ${causeBlock}
+      ${valuesBlock}
     `;
     grid.appendChild(visionBox);
     visionBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('vto'));
@@ -2235,6 +2233,13 @@ function renderMy90() {
   // Reads one_year_goals from V/TO. Forward-compatible: when we add
   // rocks.goal_id and issues.rock_id later, this card grows progress
   // bars (rocks done / total + to-dos done / total per goal).
+  // owner_ids (array) is preferred; owner_id (single) is the legacy fallback.
+  const goalOwners = (g) => {
+    const ids = Array.isArray(g.owner_ids) && g.owner_ids.length
+      ? g.owner_ids
+      : (g.owner_id ? [+g.owner_id] : []);
+    return ids.map(id => state.users.find(u => u.id === +id)).filter(Boolean);
+  };
   const goals = (vto && vto.one_year_goals) || [];
   if (goals.length) {
     const fyLabel = vto.one_year_future_date
@@ -2254,9 +2259,9 @@ function renderMy90() {
       </div>
       <div class="my90-box-body my90-goals-body">
         ${goals.map((g, i) => {
-          const owner = g.owner_id ? state.users.find(u => u.id === g.owner_id) : null;
-          const ownerHtml = owner
-            ? `<span class="my90-goal-owner">${esc(owner.name.split(' ')[0])}</span>`
+          const owners = goalOwners(g);
+          const ownerHtml = owners.length
+            ? `<span class="my90-goal-owner">${owners.map(o => esc(o.name.split(' ')[0])).join(' · ')}</span>`
             : '';
           return `
             <div class="my90-goal">
@@ -3512,15 +3517,17 @@ function renderVtoOneYear() {
       const li = document.createElement('li');
       const text = document.createElement('span'); text.textContent = g.text || '';
       li.appendChild(text);
-      if (g.owner_id) {
-        const owner = state.users.find(u => u.id === +g.owner_id);
-        if (owner) {
-          const tag = document.createElement('span');
-          tag.className = 'vto-goal-owner';
-          tag.textContent = owner.name;
-          li.appendChild(tag);
-        }
-      }
+      const ownerIds = Array.isArray(g.owner_ids) && g.owner_ids.length
+        ? g.owner_ids
+        : (g.owner_id ? [+g.owner_id] : []);
+      ownerIds.forEach(id => {
+        const owner = state.users.find(u => u.id === +id);
+        if (!owner) return;
+        const tag = document.createElement('span');
+        tag.className = 'vto-goal-owner';
+        tag.textContent = owner.name;
+        li.appendChild(tag);
+      });
       ul.appendChild(li);
     });
     gWrap.appendChild(ul);
@@ -3676,33 +3683,53 @@ function vtoGoalsEditor(goals) {
   const listWrap = document.createElement('div');
   listWrap.className = 'vto-dyn-list';
   listWrap.dataset.field = 'one_year_goals';
-  const draft = goals.length ? goals.map(g => ({ text: g.text || '', owner_id: g.owner_id || null })) : [{ text: '', owner_id: null }];
+  // Each goal carries an owner_ids array. Legacy single owner_id is migrated in.
+  const initOwnerIds = (g) => {
+    if (Array.isArray(g.owner_ids) && g.owner_ids.length) return g.owner_ids.map(id => +id);
+    if (g.owner_id) return [+g.owner_id];
+    return [];
+  };
+  const draft = goals.length
+    ? goals.map(g => ({ text: g.text || '', owner_ids: initOwnerIds(g) }))
+    : [{ text: '', owner_ids: [] }];
 
   const repaint = () => {
     listWrap.innerHTML = '';
     draft.forEach((g, i) => {
-      const row = document.createElement('div'); row.className = 'vto-dyn-row';
+      const row = document.createElement('div'); row.className = 'vto-dyn-row vto-dyn-row--goal';
+
       const text = document.createElement('input');
       text.type = 'text'; text.placeholder = 'Goal for the year';
       text.value = g.text || '';
       text.className = 'input vto-dyn-main';
       text.oninput = () => { draft[i].text = text.value; };
-      const owner = document.createElement('select');
-      owner.className = 'input';
-      const opt0 = document.createElement('option'); opt0.value = ''; opt0.textContent = '— Owner —';
-      owner.appendChild(opt0);
+
+      const ownersWrap = document.createElement('div');
+      ownersWrap.className = 'vto-owner-chips';
+      const ownersLabel = document.createElement('span');
+      ownersLabel.className = 'vto-owner-chips-label';
+      ownersLabel.textContent = 'Owners:';
+      ownersWrap.appendChild(ownersLabel);
       state.users.forEach(u => {
-        const opt = document.createElement('option');
-        opt.value = u.id; opt.textContent = u.name;
-        if (g.owner_id && +g.owner_id === u.id) opt.selected = true;
-        owner.appendChild(opt);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'vto-owner-chip' + (g.owner_ids.includes(u.id) ? ' selected' : '');
+        chip.textContent = u.name;
+        chip.onclick = () => {
+          const idx = draft[i].owner_ids.indexOf(u.id);
+          if (idx >= 0) draft[i].owner_ids.splice(idx, 1);
+          else draft[i].owner_ids.push(u.id);
+          chip.classList.toggle('selected');
+        };
+        ownersWrap.appendChild(chip);
       });
-      owner.onchange = () => { draft[i].owner_id = owner.value ? +owner.value : null; };
+
       const rm = document.createElement('button');
       rm.type = 'button'; rm.className = 'btn btn-ghost btn-sm vto-dyn-remove';
       rm.textContent = '×';
       rm.onclick = () => { draft.splice(i, 1); repaint(); };
-      row.append(text, owner, rm);
+
+      row.append(text, ownersWrap, rm);
       listWrap.appendChild(row);
     });
   };
@@ -3712,7 +3739,7 @@ function vtoGoalsEditor(goals) {
   const add = document.createElement('button');
   add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
   add.textContent = '+ Add goal';
-  add.onclick = () => { draft.push({ text: '', owner_id: null }); repaint(); };
+  add.onclick = () => { draft.push({ text: '', owner_ids: [] }); repaint(); };
 
   wrap.append(listWrap, add);
   return wrap;
@@ -3721,7 +3748,14 @@ function vtoCollectGoals() {
   const listWrap = qs('.vto-dyn-list[data-field="one_year_goals"]');
   if (!listWrap || !listWrap._draft) return [];
   return listWrap._draft
-    .map(g => ({ text: (g.text || '').trim(), owner_id: g.owner_id ? +g.owner_id : null }))
+    .map(g => {
+      const ids = (g.owner_ids || []).map(x => +x).filter(Boolean);
+      return {
+        text: (g.text || '').trim(),
+        owner_ids: ids,
+        owner_id: ids[0] || null,  // backward compat with consumers reading owner_id
+      };
+    })
     .filter(g => g.text);
 }
 
