@@ -2199,6 +2199,14 @@ function renderMy90() {
   const vals = (vto && vto.core_values) || [];
   const cause = vto && vto.core_focus_purpose;
   const niche = vto && vto.core_focus_niche;
+  // Owners + users with 'vto' grant see the link to the full V/TO; everyone
+  // else sees the cards (Vision + Goals) but no dead-end button.
+  const canOpenVto = state.currentUser?.role === 'owner'
+    || (state.currentUser?.tabs || []).includes('vto');
+  const openVtoBtn = canOpenVto
+    ? `<button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO →</button>`
+    : '';
+
   if (vals.length || cause || niche) {
     const visionBox = document.createElement('div');
     visionBox.className = 'card my90-box my90-box--full my90-vision';
@@ -2220,13 +2228,13 @@ function renderMy90() {
     visionBox.innerHTML = `
       <div class="my90-vision-header">
         <span class="my90-vision-eyebrow">Who we are</span>
-        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO →</button>
+        ${openVtoBtn}
       </div>
       ${causeBlock}
       ${valuesBlock}
     `;
     grid.appendChild(visionBox);
-    visionBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('vto'));
+    visionBox.querySelector('.my90-view-all')?.addEventListener('click', () => goToView('vto'));
   }
 
   // ── FY27 Goals card ───────────────────────────────────────────────
@@ -2255,7 +2263,7 @@ function renderMy90() {
         <span class="my90-box-title">Annual Goals</span>
         <span class="my90-box-quarter">${fyLabel}</span>
         <span class="my90-box-count">${goals.length}</span>
-        <button class="btn btn-ghost my90-view-all" data-goto="vto">Open V/TO</button>
+        ${openVtoBtn}
       </div>
       <div class="my90-box-body my90-goals-body">
         ${goals.map((g, i) => {
@@ -2273,7 +2281,7 @@ function renderMy90() {
       </div>
     `;
     grid.appendChild(goalsBox);
-    goalsBox.querySelector('.my90-view-all').addEventListener('click', () => goToView('vto'));
+    goalsBox.querySelector('.my90-view-all')?.addEventListener('click', () => goToView('vto'));
   }
 
   // ── Box 1: My Rocks ───────────────────────────────────────────────

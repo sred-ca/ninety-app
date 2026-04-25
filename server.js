@@ -998,8 +998,35 @@ app.post('/api/quickbooks/sync', requireOwner, wrap(async (req, res) => {
 // Single-row doc for the whole org. GET always returns a row (created on first
 // call). PUT accepts any subset of V/TO fields — the frontend saves per-section
 // (Core Values, Core Focus, etc.) so updates stay small.
-app.get('/api/vto', wrap(async (req, res) => ok(res, await vtoQueries.getOrCreate())));
-app.put('/api/vto', wrap(async (req, res) => ok(res, await vtoQueries.update(req.body || {}))));
+// V/TO read access: owners + users granted the 'vto' tab see the full doc.
+// Everyone else gets a trimmed public subset (core values, core focus, annual
+// goals + 1-year future date) so the My 90 dashboard cards still render.
+// PUT requires full access.
+async function hasVtoAccess(userId) {
+  const u = await userQueries.getById(userId);
+  if (!u) return false;
+  if (u.role === 'owner') return true;
+  const tabs = await tabAccessQueries.listForUser(userId);
+  return tabs.includes('vto');
+}
+function publicVtoSubset(row) {
+  return {
+    core_values:          row.core_values || [],
+    core_focus_purpose:   row.core_focus_purpose || '',
+    core_focus_niche:     row.core_focus_niche || '',
+    one_year_goals:       row.one_year_goals || [],
+    one_year_future_date: row.one_year_future_date,
+  };
+}
+app.get('/api/vto', wrap(async (req, res) => {
+  const full = await vtoQueries.getOrCreate();
+  if (await hasVtoAccess(req.userId)) return ok(res, full);
+  ok(res, publicVtoSubset(full));
+}));
+app.put('/api/vto', wrap(async (req, res) => {
+  if (!(await hasVtoAccess(req.userId))) return fail(res, 'Forbidden', 403);
+  ok(res, await vtoQueries.update(req.body || {}));
+}));
 
 // ── Rocks ────────────────────────────────────────────────────────────────────
 app.get('/api/rocks/quarters', wrap(async (req, res) => ok(res, await rockQueries.quarters())));
