@@ -229,6 +229,10 @@ if (USE_PG) {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_date DATE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS private  BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS source   TEXT NOT NULL DEFAULT 'manual';
+      ALTER TABLE issues ADD COLUMN IF NOT EXISTS rock_id  INTEGER REFERENCES rocks(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_issues_rock_id ON issues(rock_id);
+      ALTER TABLE rocks  ADD COLUMN IF NOT EXISTS goal_id  TEXT;
+      CREATE INDEX IF NOT EXISTS idx_rocks_goal_id ON rocks(goal_id) WHERE goal_id IS NOT NULL;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS picture TEXT;
       ALTER TABLE users  ADD COLUMN IF NOT EXISTS coaching_enabled BOOLEAN NOT NULL DEFAULT FALSE;
@@ -591,7 +595,8 @@ if (USE_PG) {
   `;
   const ISSUE_Q = `
     SELECT i.id, i.title, i.description, i.owner_id, i.status, i.priority,
-           i.archived, i.private, i.due_date, i.created_at, i.updated_at,
+           i.archived, i.private, i.due_date, i.source, i.rock_id,
+           i.created_at, i.updated_at,
            u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
     FROM issues i LEFT JOIN users u ON i.owner_id = u.id
   `;
@@ -653,16 +658,16 @@ if (USE_PG) {
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ROCK_Q} WHERE r.id=$1`, [id])).rows[0] ?? null,
-    create: async ({ title, description, owner_id, quarter, status, progress }) => {
+    create: async ({ title, description, owner_id, quarter, status, progress, goal_id }) => {
       const { rows } = await pool.query(
-        `INSERT INTO rocks (title,description,owner_id,quarter,status,progress)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [title, description || null, owner_id || null, quarter, status || 'not_started', progress || 0]
+        `INSERT INTO rocks (title,description,owner_id,quarter,status,progress,goal_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [title, description || null, owner_id || null, quarter, status || 'not_started', progress || 0, goal_id || null]
       );
       return rockQueries.getById(rows[0].id);
     },
     update: async (id, fields) => {
-      const allowed = ['title','description','owner_id','quarter','status','progress'];
+      const allowed = ['title','description','owner_id','quarter','status','progress','goal_id'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return rockQueries.getById(id);
       const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
@@ -697,15 +702,15 @@ if (USE_PG) {
       return q.rows;
     },
     getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
-    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source, rock_id }) => {
       const { rows } = await pool.query(
-        'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null, !!isPrivate, source || 'manual']
+        'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private,source,rock_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+        [title, description || null, owner_id || null, 'in_progress', priority || 'medium', due_date || null, !!isPrivate, source || 'manual', rock_id || null]
       );
       return issueQueries.getById(rows[0].id);
     },
     update: async (id, fields) => {
-      const allowed = ['title','description','owner_id','status','priority','archived','private','due_date'];
+      const allowed = ['title','description','owner_id','status','priority','archived','private','due_date','rock_id'];
       const keys = allowed.filter(k => k in fields);
       if (!keys.length) return issueQueries.getById(id);
       const sets = keys.map((k, i) => `${k}=$${i + 1}`).join(', ');
@@ -1261,15 +1266,40 @@ if (USE_PG) {
     'one_year_measurables', 'one_year_goals',
   ]);
   const VTO_DATE_FIELDS = new Set(['three_year_future_date', 'one_year_future_date']);
+  // Lazy ID assignment for one_year_goals. Each goal gets a stable string id
+  // so rocks can reference it via rocks.goal_id. Existing goals without ids
+  // are filled in on read and persisted.
+  function ensureGoalIds(goals) {
+    let changed = false;
+    const out = (goals || []).map(g => {
+      if (g && g.id) return g;
+      changed = true;
+      return { ...g, id: 'g_' + Math.random().toString(36).slice(2, 10) };
+    });
+    return { goals: out, changed };
+  }
+
   const vtoQueries = {
     getOrCreate: async () => {
       const existing = await pool.query('SELECT * FROM vto ORDER BY id ASC LIMIT 1');
-      if (existing.rows[0]) return existing.rows[0];
-      const inserted = await pool.query('INSERT INTO vto DEFAULT VALUES RETURNING *');
-      return inserted.rows[0];
+      const row = existing.rows[0]
+        || (await pool.query('INSERT INTO vto DEFAULT VALUES RETURNING *')).rows[0];
+      const { goals, changed } = ensureGoalIds(row.one_year_goals);
+      if (changed) {
+        const updated = await pool.query(
+          'UPDATE vto SET one_year_goals=$1::jsonb WHERE id=$2 RETURNING *',
+          [JSON.stringify(goals), row.id]
+        );
+        return updated.rows[0];
+      }
+      return row;
     },
     update: async (fields) => {
       const row = await vtoQueries.getOrCreate();
+      // Stamp ids on goals coming in without one (preserve existing ids).
+      if (Array.isArray(fields.one_year_goals)) {
+        fields.one_year_goals = ensureGoalIds(fields.one_year_goals).goals;
+      }
       const keys = VTO_FIELDS.filter(k => k in fields);
       if (!keys.length) return row;
       const values = keys.map(k => {
@@ -1582,15 +1612,16 @@ if (USE_PG) {
       return list.sort((a,b) => b.created_at.localeCompare(a.created_at)).map(enrichRock);
     },
     getById: async (id) => { const r = db.rocks.find(r => r.id === +id); return r ? enrichRock(r) : null; },
-    create: async ({ title, description, owner_id, quarter, status, progress }) => {
+    create: async ({ title, description, owner_id, quarter, status, progress, goal_id }) => {
       const rock = { id: nextId('rocks'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, quarter, status: status || 'not_started',
-        progress: progress || 0, created_at: nowStr(), updated_at: nowStr() };
+        progress: progress || 0, goal_id: goal_id || null,
+        created_at: nowStr(), updated_at: nowStr() };
       db.rocks.push(rock); persist(db); return enrichRock(rock);
     },
     update: async (id, fields) => {
       const r = db.rocks.find(r => r.id === +id); if (!r) return null;
-      ['title','description','owner_id','quarter','status','progress'].forEach(k => { if (k in fields) r[k] = fields[k]; });
+      ['title','description','owner_id','quarter','status','progress','goal_id'].forEach(k => { if (k in fields) r[k] = fields[k]; });
       if ('owner_id' in fields && fields.owner_id) r.owner_id = +fields.owner_id;
       r.updated_at = nowStr(); persist(db); return enrichRock(r);
     },
@@ -1631,16 +1662,17 @@ if (USE_PG) {
         .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.created_at.localeCompare(a.created_at));
     },
     getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
-    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source }) => {
+    create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source, rock_id }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, status: 'in_progress', priority: priority || 'medium',
         archived: false, private: !!isPrivate, due_date: due_date || null,
-        source: source || 'manual', created_at: nowStr(), updated_at: nowStr() };
+        source: source || 'manual', rock_id: rock_id ? +rock_id : null,
+        created_at: nowStr(), updated_at: nowStr() };
       db.issues.push(issue); persist(db); return enrichIssue(issue);
     },
     update: async (id, fields) => {
       const i = db.issues.find(i => i.id === +id); if (!i) return null;
-      ['title','description','owner_id','status','priority','archived','private','due_date'].forEach(k => { if (k in fields) i[k] = fields[k]; });
+      ['title','description','owner_id','status','priority','archived','private','due_date','rock_id'].forEach(k => { if (k in fields) i[k] = fields[k]; });
       if ('owner_id' in fields && fields.owner_id) i.owner_id = +fields.owner_id;
       i.updated_at = nowStr(); persist(db); return enrichIssue(i);
     },
@@ -2124,13 +2156,27 @@ if (USE_PG) {
       updated_at: nowStr(),
     };
   }
+  function ensureGoalIdsJson(goals) {
+    let changed = false;
+    const out = (goals || []).map(g => {
+      if (g && g.id) return g;
+      changed = true;
+      return { ...g, id: 'g_' + Math.random().toString(36).slice(2, 10) };
+    });
+    return { goals: out, changed };
+  }
   const vtoQueries = {
     getOrCreate: async () => {
       if (!db.vto) { db.vto = defaultVto(); persist(db); }
+      const { goals, changed } = ensureGoalIdsJson(db.vto.one_year_goals);
+      if (changed) { db.vto.one_year_goals = goals; persist(db); }
       return { ...db.vto };
     },
     update: async (fields) => {
       if (!db.vto) db.vto = defaultVto();
+      if (Array.isArray(fields.one_year_goals)) {
+        fields.one_year_goals = ensureGoalIdsJson(fields.one_year_goals).goals;
+      }
       for (const k of VTO_FIELDS) {
         if (!(k in fields)) continue;
         const v = fields[k];

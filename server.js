@@ -1032,11 +1032,11 @@ app.put('/api/vto', wrap(async (req, res) => {
 app.get('/api/rocks/quarters', wrap(async (req, res) => ok(res, await rockQueries.quarters())));
 app.get('/api/rocks', wrap(async (req, res) => ok(res, await rockQueries.getAll(req.query.quarter))));
 app.post('/api/rocks', wrap(async (req, res) => {
-  const { title, description, owner_id, quarter, status, progress } = req.body;
+  const { title, description, owner_id, quarter, status, progress, goal_id } = req.body;
   if (!title)   return fail(res, 'title is required');
   if (!quarter) return fail(res, 'quarter is required');
   if (!allow(status, STATUS_ROCK)) return fail(res, `status must be one of ${STATUS_ROCK.join(', ')}`);
-  ok(res, await rockQueries.create({ title, description, owner_id, quarter, status, progress }));
+  ok(res, await rockQueries.create({ title, description, owner_id, quarter, status, progress, goal_id }));
 }));
 app.put('/api/rocks/:id', wrap(async (req, res) => {
   if (!allow(req.body.status, STATUS_ROCK)) return fail(res, `status must be one of ${STATUS_ROCK.join(', ')}`);
@@ -1070,10 +1070,10 @@ app.get('/api/issues', wrap(async (req, res) => {
   ok(res, await issueQueries.getAll(req.query.status, req.userId, includeArchived));
 }));
 app.post('/api/issues', wrap(async (req, res) => {
-  const { title, description, owner_id, priority, due_date, private: isPrivate } = req.body;
+  const { title, description, owner_id, priority, due_date, private: isPrivate, rock_id } = req.body;
   if (!title) return fail(res, 'title is required');
   if (!allow(priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
-  ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate }));
+  ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate, rock_id }));
 }));
 app.put('/api/issues/:id', wrap(async (req, res) => {
   if (!allow(req.body.status, STATUS_ISSUE)) return fail(res, `status must be one of ${STATUS_ISSUE.join(', ')}`);

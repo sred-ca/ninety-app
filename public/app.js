@@ -266,6 +266,7 @@ qsa('.nav-item').forEach(btn => {
     if (view === 'meetings')  loadMeetings();
     if (view === 'insights')  loadInsights();
     if (view === 'stella')    loadStella();
+    if (view === 'goals')     loadGoals();
     if (view === 'budget')    loadBudget();
     if (view === 'admin')     loadAdmin();
   });
@@ -410,6 +411,12 @@ function openRockModal(editId) {
   const qSel = qs('#rock-quarter');
   qSel.innerHTML = allQ.map(q => `<option value="${q}" ${rock ? (rock.quarter === q ? 'selected' : '') : (q === (state.quarterFilter || currentQuarter()) ? 'selected' : '')}>${q}</option>`).join('');
 
+  // Populate goal dropdown from V/TO annual goals.
+  const goalSel = qs('#rock-goal');
+  const allGoals = (state.vto?.one_year_goals) || [];
+  goalSel.innerHTML = '<option value="">— No goal —</option>' +
+    allGoals.map((g, i) => `<option value="${esc(g.id || '')}" ${rock && rock.goal_id === g.id ? 'selected' : ''}>${i + 1}. ${esc((g.text || '').slice(0, 80))}</option>`).join('');
+
   // Milestones section — only shown when editing an existing rock.
   state.currentMilestones = [];
   state.currentMilestoneRockId = rock ? rock.id : null;
@@ -551,6 +558,7 @@ qs('#save-rock-btn').addEventListener('click', async () => {
     owner_id: qs('#rock-owner').value || null,
     quarter: qs('#rock-quarter').value,
     status: qs('#rock-status').value,
+    goal_id: qs('#rock-goal').value || null,
   };
   // Only send manual progress when there are no milestones — otherwise the
   // server keeps it in sync with milestone completion automatically.
@@ -1015,6 +1023,26 @@ function openIssueModal(editId) {
     state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
   if (!issue) ownerSel.value = state.currentUser ? state.currentUser.id : '';
 
+  // Populate Rock dropdown — rocks for the current quarter, plus the rock
+  // this to-do is already linked to (if it's from a different quarter).
+  const rockSel = qs('#issue-rock');
+  const goalIndexById = new Map((state.vto?.one_year_goals || []).map((g, i) => [g.id, i + 1]));
+  const allRocks = state.rocks || [];
+  const cq = currentQuarter();
+  const rocksForPicker = [
+    ...allRocks.filter(r => r.quarter === cq),
+    ...(issue && issue.rock_id && allRocks.find(r => r.id === issue.rock_id && r.quarter !== cq)
+        ? [allRocks.find(r => r.id === issue.rock_id)]
+        : []),
+  ];
+  rockSel.innerHTML = '<option value="">— No rock —</option>' +
+    rocksForPicker.map(r => {
+      const goalNum = r.goal_id ? goalIndexById.get(r.goal_id) : null;
+      const prefix = goalNum ? `[Goal ${goalNum}] ` : '';
+      const sel = issue && issue.rock_id === r.id ? 'selected' : '';
+      return `<option value="${r.id}" ${sel}>${esc(prefix)}${esc(r.title)} · ${esc(r.quarter)}</option>`;
+    }).join('');
+
   openModal('issue-modal');
   qs('#issue-title').focus();
 }
@@ -1029,6 +1057,7 @@ qs('#save-issue-btn').addEventListener('click', async () => {
     status: qs('#issue-status').value,
     due_date: qs('#issue-due-date').value || null,
     private: qs('#issue-private').checked,
+    rock_id: qs('#issue-rock').value ? +qs('#issue-rock').value : null,
   };
   if (!body.title) { qs('#issue-title').focus(); return; }
   try {
@@ -4485,6 +4514,176 @@ async function openBudgetAddLineModal() {
 }
 
 /* ── Load all ────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════
+   GOALS TAB  (Goal → Rock → To-Do drill-down)
+   ════════════════════════════════════════════════════════════════════ */
+
+const goalsState = { expandedGoals: new Set(), expandedRocks: new Set() };
+
+async function loadGoals() {
+  // Fetch fresh data — V/TO for goals, all rocks (every quarter), all issues.
+  const [vto, rocks, issues] = await Promise.all([
+    api.get('/api/vto').catch(() => ({})),
+    api.get('/api/rocks'),
+    api.get('/api/issues?include_archived=1'),
+  ]);
+  state.vto    = vto || {};
+  state.rocks  = rocks || [];
+  state.issues = issues || [];
+  renderGoals();
+}
+
+function renderGoals() {
+  const root = qs('#goals-tree');
+  const goals = (state.vto?.one_year_goals) || [];
+  const sub   = qs('#goals-subtitle');
+  if (state.vto?.one_year_future_date) {
+    const fy = new Date(state.vto.one_year_future_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    sub.textContent = `Annual goals to ${fy} — drill into rocks and to-dos`;
+  }
+
+  if (!goals.length) {
+    root.innerHTML = `<div class="empty-state"><p>No annual goals yet. Add them in the V/TO tab.</p></div>`;
+    return;
+  }
+
+  root.innerHTML = goals.map((g, i) => renderGoalCard(g, i)).join('');
+
+  // Wire interactions
+  root.querySelectorAll('[data-toggle-goal]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.toggleGoal;
+      if (goalsState.expandedGoals.has(id)) goalsState.expandedGoals.delete(id);
+      else goalsState.expandedGoals.add(id);
+      renderGoals();
+    });
+  });
+  root.querySelectorAll('[data-toggle-rock]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = +el.dataset.toggleRock;
+      if (goalsState.expandedRocks.has(id)) goalsState.expandedRocks.delete(id);
+      else goalsState.expandedRocks.add(id);
+      renderGoals();
+    });
+  });
+  root.querySelectorAll('[data-rock-edit]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openRockModal(+el.dataset.rockEdit);
+    });
+  });
+  root.querySelectorAll('[data-issue-edit]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openIssueModal(+el.dataset.issueEdit);
+    });
+  });
+}
+
+function renderGoalCard(goal, idx) {
+  const goalRocks = (state.rocks || []).filter(r => r.goal_id === goal.id);
+  const totalRocks = goalRocks.length;
+  const doneRocks  = goalRocks.filter(r => r.status === 'done').length;
+  const pct = totalRocks ? Math.round((doneRocks / totalRocks) * 100) : 0;
+
+  const ownerIds = Array.isArray(goal.owner_ids) && goal.owner_ids.length
+    ? goal.owner_ids
+    : (goal.owner_id ? [+goal.owner_id] : []);
+  const owners = ownerIds.map(id => state.users.find(u => u.id === +id)).filter(Boolean);
+
+  const expanded = goalsState.expandedGoals.has(goal.id);
+
+  const ownersHtml = owners.length
+    ? owners.map(o => `<span class="goal-owner">${esc(o.name.split(' ')[0])}</span>`).join('')
+    : '<span class="goal-owner goal-owner-empty">No owner</span>';
+
+  // Sort rocks by quarter then status (done last)
+  const statusOrder = { not_started: 0, on_track: 1, off_track: 2, done: 3 };
+  goalRocks.sort((a, b) => (a.quarter || '').localeCompare(b.quarter || '')
+    || (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
+
+  const rocksHtml = expanded
+    ? (totalRocks === 0
+        ? `<div class="goal-empty">No rocks linked to this goal yet — link one when you add or edit a rock.</div>`
+        : goalRocks.map(r => renderRockRow(r)).join(''))
+    : '';
+
+  return `
+    <div class="goal-card">
+      <div class="goal-card-head" data-toggle-goal="${esc(goal.id)}">
+        <div class="goal-card-num">${idx + 1}</div>
+        <div class="goal-card-main">
+          <div class="goal-card-title">${esc(goal.text || '')}</div>
+          <div class="goal-card-meta">
+            ${ownersHtml}
+            <span class="goal-progress-summary">
+              ${doneRocks} / ${totalRocks} rock${totalRocks === 1 ? '' : 's'} done
+            </span>
+          </div>
+        </div>
+        <div class="goal-card-progress">
+          <div class="goal-progress-bar"><div class="goal-progress-fill" style="width:${pct}%"></div></div>
+          <div class="goal-progress-pct">${pct}%</div>
+        </div>
+        <div class="goal-card-toggle">${expanded ? '▾' : '▸'}</div>
+      </div>
+      ${expanded ? `<div class="goal-card-body">${rocksHtml}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderRockRow(rock) {
+  const owner = rock.owner_id ? state.users.find(u => u.id === rock.owner_id) : null;
+  const expanded = goalsState.expandedRocks.has(rock.id);
+  const todos = (state.issues || []).filter(i => i.rock_id === rock.id && !i.archived);
+  const doneCount = todos.filter(t => t.status === 'solved').length;
+
+  const statusLabel = { not_started: 'Not Started', on_track: 'On Track', off_track: 'Off Track', done: 'Done' }[rock.status] || rock.status;
+  const statusClass = `rock-status rock-status--${rock.status}`;
+
+  const todosHtml = expanded
+    ? (todos.length === 0
+        ? `<div class="goal-rock-todos-empty">No to-dos linked to this rock.</div>`
+        : todos.map(t => renderTodoRow(t)).join(''))
+    : '';
+
+  return `
+    <div class="goal-rock">
+      <div class="goal-rock-head" data-toggle-rock="${rock.id}">
+        <div class="goal-rock-toggle">${expanded ? '▾' : '▸'}</div>
+        <div class="goal-rock-main">
+          <div class="goal-rock-title">${esc(rock.title)}</div>
+          <div class="goal-rock-meta">
+            <span class="goal-rock-quarter">${esc(rock.quarter || '')}</span>
+            ${owner ? `<span class="goal-owner">${esc(owner.name.split(' ')[0])}</span>` : ''}
+            <span class="${statusClass}">${statusLabel}</span>
+            <span class="goal-rock-progress-text">${rock.progress || 0}%</span>
+            ${todos.length ? `<span class="goal-rock-todos-count">${doneCount} / ${todos.length} to-do${todos.length === 1 ? '' : 's'}</span>` : ''}
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm goal-rock-edit" data-rock-edit="${rock.id}" title="Edit rock">Edit</button>
+      </div>
+      ${expanded ? `<div class="goal-rock-todos">${todosHtml}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderTodoRow(todo) {
+  const owner = todo.owner_id ? state.users.find(u => u.id === todo.owner_id) : null;
+  const done = todo.status === 'solved';
+  const statusLabel = { in_progress: 'In Progress', waiting_for: 'Waiting For', blocker: 'Blocker', solved: 'Solved' }[todo.status] || todo.status;
+  return `
+    <div class="goal-todo${done ? ' done' : ''}" data-issue-edit="${todo.id}">
+      <span class="goal-todo-check">${done ? '✓' : '○'}</span>
+      <span class="goal-todo-title">${esc(todo.title)}</span>
+      ${todo.due_date ? `<span class="goal-todo-due">${formatDateShort(todo.due_date)}</span>` : ''}
+      ${owner ? `<span class="goal-owner">${esc(owner.name.split(' ')[0])}</span>` : ''}
+      <span class="goal-todo-status goal-todo-status--${todo.status}">${statusLabel}</span>
+    </div>
+  `;
+}
+
 async function loadAll() {
   await Promise.all([
     populateQuarterFilter().then(() => loadRocks()),
@@ -4492,6 +4691,10 @@ async function loadAll() {
     loadTeamIssues(),
     loadMeetings(),
     loadMy90(),
+    // Cache V/TO so modals (rock goal dropdown, etc.) can read goals without
+    // first navigating to the V/TO tab. Falls back to {} on failure (e.g.
+    // no permission) so callers can read .one_year_goals safely.
+    api.get('/api/vto').then(v => { state.vto = v || {}; }).catch(() => { state.vto = {}; }),
   ]);
 }
 
