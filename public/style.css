@@ -687,6 +687,13 @@ body {
   border-radius: 14px;
   width: 100%;
   max-width: 520px;
+  /* Bound height to viewport so tall content scrolls inside the body
+     instead of pushing the footer (and Save button) off-screen. The
+     overlay already supplies 20px of edge padding; account for that
+     plus a small safety so the box never touches edges on shorter screens. */
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow);
   animation: modal-in 0.15s ease-out;
 }
@@ -705,6 +712,7 @@ body {
   justify-content: space-between;
   padding: 20px 24px 16px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .modal-header h3 {
   font-size: 17px;
@@ -728,13 +736,23 @@ body {
 }
 .modal-close:hover { background: var(--surface3); color: var(--text); }
 
-.modal-body { padding: 20px 24px; }
+.modal-body {
+  padding: 20px 24px;
+  /* Allow the body to scroll when the modal hits its max-height; min-height:0
+     is needed so flex children with overflow inside scroll containers behave
+     correctly inside a column flexbox. */
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
 .modal-footer {
   padding: 16px 24px 20px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--surface);
 }
 
 /* ── Form ─────────────────────────────────────────────────────────── */
