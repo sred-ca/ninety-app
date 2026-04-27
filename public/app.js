@@ -1004,7 +1004,7 @@ qs('#add-issue-btn').addEventListener('click', () => openIssueModal(null));
 
 function openIssueModal(editId) {
   const issue = editId ? state.issues.find(i => i.id === editId) : null;
-  qs('#issue-modal-title').textContent = issue ? 'Edit Issue' : 'Add Issue';
+  qs('#issue-modal-title').textContent = issue ? 'Edit To-Do' : 'Add To-Do';
   qs('#issue-id').value = issue ? issue.id : '';
   qs('#issue-title').value = issue ? issue.title : '';
   qs('#issue-description').value = issue ? (issue.description || '') : '';
