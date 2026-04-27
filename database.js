@@ -630,9 +630,46 @@ if (USE_PG) {
     update: async (id, name, color) => (await pool.query(
       'UPDATE users SET name=$1,color=$2 WHERE id=$3 RETURNING *', [name, color, id]
     )).rows[0] ?? null,
-    setRole: async (id, role) => (await pool.query(
-      'UPDATE users SET role=$1 WHERE id=$2 RETURNING *', [role, id]
-    )).rows[0] ?? null,
+    // Atomic last-owner guard. The route also pre-checks for a friendly
+    // error, but two simultaneous demotions could both pass a stale count
+    // and leave zero owners — so the real enforcement happens here, inside
+    // a transaction that locks every owner row before re-counting.
+    setRole: async (id, role) => {
+      const client = await pool.connect();
+      let lastOwner = false;
+      let result = null;
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT 1 FROM users WHERE role='owner' FOR UPDATE`);
+        if (role === 'member') {
+          const cur = (await client.query('SELECT role FROM users WHERE id=$1', [id])).rows[0];
+          if (cur && cur.role === 'owner') {
+            const c = (await client.query(`SELECT COUNT(*)::int AS c FROM users WHERE role='owner'`)).rows[0].c;
+            if (c <= 1) lastOwner = true;
+          }
+        }
+        if (!lastOwner) {
+          const { rows } = await client.query(
+            'UPDATE users SET role=$1 WHERE id=$2 RETURNING *', [role, id]
+          );
+          result = rows[0] ?? null;
+          await client.query('COMMIT');
+        } else {
+          await client.query('ROLLBACK');
+        }
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+      if (lastOwner) {
+        const err = new Error('Cannot demote the last owner — promote another user first.');
+        err.code = 'LAST_OWNER';
+        throw err;
+      }
+      return result;
+    },
     countOwners: async () => (await pool.query(
       `SELECT COUNT(*)::int AS c FROM users WHERE role='owner'`
     )).rows[0].c,
@@ -1544,7 +1581,10 @@ if (USE_PG) {
     if (!u.role) u.role = 'member';
     if (OWNER_EMAILS.has(u.email) || OWNER_NAMES.has(u.name)) u.role = 'owner';
   });
-  persist(db);
+  // Boot-time persist may throw if /tmp is briefly read-only on a serverless
+  // cold start. Don't crash the whole module — the in-memory db.users will
+  // still serve requests in this instance, and the next mutation will retry.
+  try { persist(db); } catch (e) { console.error('Boot persist (role backfill) failed:', e.message); }
 
   const nowStr = () => new Date().toISOString();
   function nextId(table) { db._seq[table] = (db._seq[table] || 0) + 1; return db._seq[table]; }
@@ -1604,6 +1644,16 @@ if (USE_PG) {
     },
     setRole: async (id, role) => {
       const u = db.users.find(u => u.id === +id); if (!u) return null;
+      // Mirror the Postgres atomic guard. Single-process Node already
+      // serializes by event loop, so a simple count check is enough here.
+      if (role === 'member' && (u.role || 'member') === 'owner') {
+        const owners = db.users.filter(x => (x.role || 'member') === 'owner').length;
+        if (owners <= 1) {
+          const err = new Error('Cannot demote the last owner — promote another user first.');
+          err.code = 'LAST_OWNER';
+          throw err;
+        }
+      }
       u.role = role; persist(db); return u;
     },
     countOwners: async () => db.users.filter(u => (u.role || 'member') === 'owner').length,
@@ -1720,7 +1770,9 @@ if (USE_PG) {
       if (i.source !== 'milestone') { i.source = 'milestone'; dirty = true; }
       if (i.rock_id == null && m && m.rock_id != null) { i.rock_id = m.rock_id; dirty = true; }
     }
-    if (dirty) persist(db);
+    if (dirty) {
+      try { persist(db); } catch (e) { console.error('Boot persist (milestone backfill) failed:', e.message); }
+    }
   }
   if (!db._seq.agendas)  { db._seq.agendas = 0; }
   if (!db._seq.agenda_sections) { db._seq.agenda_sections = 0; }

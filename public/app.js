@@ -4761,6 +4761,8 @@ async function loadAll() {
       unauthorized: 'Only @sred.ca accounts are allowed.',
       token_exchange: 'Sign-in failed. Please try again.',
       cancelled: 'Sign-in was cancelled.',
+      state_mismatch: 'Sign-in security check failed. Please try again.',
+      unverified_email: 'Your Google account email is not verified.',
     };
     showLoginScreen(oauthError ? (msgs[oauthError] || 'Sign-in failed.') : null);
   }

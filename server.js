@@ -13,8 +13,16 @@ const PORT = process.env.PORT || 3000;
 const COOKIE_NAME   = 'ninety_auth';
 const COOKIE_SECRET = process.env.SESSION_SECRET || 'ninety-dev-secret-change-me';
 
+// Server-side cookie lifetime (must match the cookie's maxAge below). The
+// signed payload carries an `exp` claim so a leaked cookie value is invalid
+// after this window even if SESSION_SECRET hasn't been rotated.
+const AUTH_COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 function makeAuthCookie(userId) {
-  const payload = Buffer.from(JSON.stringify({ userId })).toString('base64url');
+  const now = Date.now();
+  const payload = Buffer.from(JSON.stringify({
+    userId, iat: now, exp: now + AUTH_COOKIE_MAX_AGE_MS,
+  })).toString('base64url');
   const sig     = crypto.createHmac('sha256', COOKIE_SECRET).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
@@ -29,8 +37,13 @@ function readAuthCookie(req) {
   try {
     if (!crypto.timingSafeEqual(Buffer.from(sig, 'base64url'), Buffer.from(expected, 'base64url'))) return null;
   } catch { return null; }
-  try { return JSON.parse(Buffer.from(payload, 'base64url').toString()); }
+  let parsed;
+  try { parsed = JSON.parse(Buffer.from(payload, 'base64url').toString()); }
   catch { return null; }
+  // Reject expired cookies. Pre-exp-claim cookies (legacy sessions) lack the
+  // field — those continue to work until the user re-signs in, then upgrade.
+  if (parsed && parsed.exp && Date.now() > parsed.exp) return null;
+  return parsed;
 }
 
 app.use(express.json());
@@ -41,8 +54,10 @@ const fail = (res, msg, code = 400) => res.status(code).json({ ok: false, error:
 const wrap = (fn) => async (req, res) => {
   // On cold serverless starts, migrations in initDb() can still be in flight
   // when the first request arrives. Await dbReady so column adds finish first.
+  // Unexpected errors get logged server-side; the client gets a generic
+  // message so DB constraint text / stack traces don't leak to the browser.
   try { await dbReady; await fn(req, res); }
-  catch (e) { console.error(e); fail(res, e.message, 500); }
+  catch (e) { console.error(e); if (!res.headersSent) fail(res, 'Internal server error', 500); }
 };
 
 // Require a signed auth cookie on any /api/* route that mutates data or reads
@@ -64,7 +79,7 @@ function requireOwner(req, res, next) {
       if (!u || u.role !== 'owner') return fail(res, 'forbidden', 403);
       req.userRole = u.role;
       next();
-    } catch (e) { console.error(e); fail(res, e.message, 500); }
+    } catch (e) { console.error(e); fail(res, 'Internal server error', 500); }
   })();
 }
 
@@ -85,11 +100,22 @@ const GOOGLE_REDIRECT_URI  = process.env.GOOGLE_REDIRECT_URI ||
   `http://localhost:${PORT}/auth/google/callback`;
 const ALLOWED_DOMAIN       = 'sred.ca';
 
+// Short-lived signed cookie carrying the CSRF state for the Google OAuth
+// round-trip. Same pattern as the QuickBooks flow further down.
+const GOOG_STATE_COOKIE = 'goog_oauth_state';
+
 // Step 1 — redirect to Google
 app.get('/auth/google', (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
     return res.status(500).send('GOOGLE_CLIENT_ID is not configured');
   }
+  const state = crypto.randomBytes(24).toString('base64url');
+  res.cookie(GOOG_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure:   !!process.env.VERCEL,
+    sameSite: 'lax',
+    maxAge:   10 * 60 * 1000, // 10 min — enough for slow MFA
+  });
   const params = new URLSearchParams({
     client_id:     GOOGLE_CLIENT_ID,
     redirect_uri:  GOOGLE_REDIRECT_URI,
@@ -97,14 +123,28 @@ app.get('/auth/google', (req, res) => {
     scope:         'openid email profile',
     access_type:   'online',
     prompt:        'select_account',
+    state,
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
 // Step 2 — handle callback
 app.get('/auth/google/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, state, error } = req.query;
   if (error || !code) return res.redirect('/?error=cancelled');
+
+  // CSRF: state from Google must match the cookie we set in step 1. Without
+  // this, an attacker could trick a victim into completing a code-grant flow
+  // for the attacker's email and end up signed in as the attacker.
+  const cookieRaw = req.headers.cookie || '';
+  const stateMatch = cookieRaw.match(/(?:^|;)\s*goog_oauth_state=([^;]+)/);
+  const cookieState = stateMatch ? decodeURIComponent(stateMatch[1]) : null;
+  if (!cookieState || !state || cookieState !== state) {
+    res.clearCookie(GOOG_STATE_COOKIE);
+    console.error('OAuth state mismatch');
+    return res.redirect('/?error=state_mismatch');
+  }
+  res.clearCookie(GOOG_STATE_COOKIE);
 
   try {
     // Exchange code → tokens
@@ -132,6 +172,14 @@ app.get('/auth/google/callback', async (req, res) => {
     const profile = await profileRes.json();
     console.log('OAuth profile:', profile.email);
 
+    // Require Google to have actually verified the email. Without this gate
+    // an unverified Workspace alias / external IdP federation could pass the
+    // domain check below with an attacker-controlled email.
+    if (!profile.verified_email) {
+      console.error('Unverified email:', profile.email);
+      return res.redirect('/?error=unverified_email');
+    }
+
     // Enforce @sred.ca domain
     if (!profile.email || !profile.email.endsWith(`@${ALLOWED_DOMAIN}`)) {
       console.error('Unauthorized email:', profile.email);
@@ -147,7 +195,7 @@ app.get('/auth/google/callback', async (req, res) => {
       httpOnly: true,
       secure: !!process.env.VERCEL,
       sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      maxAge: AUTH_COOKIE_MAX_AGE_MS,
     });
     res.redirect('/');
   } catch (e) {
@@ -488,7 +536,11 @@ function requireCronSecret(req, res, next) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return fail(res, 'CRON_SECRET not configured', 500);
   const got = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
-  if (got !== secret) return fail(res, 'Unauthorized', 401);
+  // Constant-time compare so the byte-by-byte timing of `===` doesn't leak
+  // the secret prefix to an attacker hitting this endpoint repeatedly.
+  const a = Buffer.from(got);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
   next();
 }
 app.get('/api/cron/promote-milestones', requireCronSecret, wrap(async (req, res) => {
@@ -552,13 +604,20 @@ app.put('/api/admin/users/:userId/role', requireOwner, wrap(async (req, res) => 
   if (!ROLES.includes(role)) return fail(res, `role must be one of ${ROLES.join(', ')}`);
   const target = await userQueries.getById(req.params.userId);
   if (!target) return fail(res, 'user not found', 404);
-  // Guardrail: never allow a change that leaves zero owners.
+  // Pre-check stays for a friendly 400 before touching the DB; setRole
+  // also enforces atomically as a race-safe safety net.
   if (role === 'member' && (target.role || 'member') === 'owner') {
     const owners = await userQueries.countOwners();
     if (owners <= 1) return fail(res, 'Cannot demote the last owner — promote another user first.');
   }
-  const updated = await userQueries.setRole(req.params.userId, role);
-  ok(res, { id: updated.id, role: updated.role });
+  try {
+    const updated = await userQueries.setRole(req.params.userId, role);
+    if (!updated) return fail(res, 'user not found', 404);
+    ok(res, { id: updated.id, role: updated.role });
+  } catch (e) {
+    if (e && e.code === 'LAST_OWNER') return fail(res, e.message);
+    throw e;
+  }
 }));
 
 // ── Budget (owner-only) ─────────────────────────────────────────────────────
