@@ -410,7 +410,7 @@ function openRockModal(editId) {
   // Populate owner dropdown
   const ownerSel = qs('#rock-owner');
   ownerSel.innerHTML = '<option value="">Unassigned</option>' +
-    state.users.map(u => `<option value="${u.id}" ${rock && rock.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+    state.users.map(u => `<option value="${u.id}" ${rock && rock.owner_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
   if (!rock) ownerSel.value = state.currentUser ? state.currentUser.id : '';
 
   // Populate quarter dropdown
@@ -1052,7 +1052,7 @@ function openIssueModal(editId) {
 
   const ownerSel = qs('#issue-owner');
   ownerSel.innerHTML = '<option value="">Unassigned</option>' +
-    state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+    state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
   if (!issue) ownerSel.value = state.currentUser ? state.currentUser.id : '';
 
   // Populate Rock dropdown from every quarter's rocks so users can link a
@@ -1323,7 +1323,7 @@ function openTeamIssueModal(editId) {
 
   const ownerSel = qs('#team-issue-owner');
   ownerSel.innerHTML = '<option value="">Unassigned</option>' +
-    state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
+    state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
   if (!issue) ownerSel.value = state.currentUser ? state.currentUser.id : '';
 
   openModal('team-issue-modal');
@@ -4020,7 +4020,7 @@ function maybeFlashQbOauthResult() {
       qb_no_session:        'Session expired during the QuickBooks flow — sign in and retry.',
       qb_token_exchange:    'QuickBooks token exchange failed. Check app credentials.',
       qb_server_error:      'Unexpected server error starting the QuickBooks flow.',
-    }[err]) || `QuickBooks error: ${err}`;
+    }[err]) || `QuickBooks error: ${esc(err)}`;
     status.innerHTML = `<span class="budget-msg-err">${msg}</span>`;
   }
   if (params.has('qb') || err) {

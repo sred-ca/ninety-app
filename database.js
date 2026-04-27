@@ -712,7 +712,14 @@ if (USE_PG) {
         : await pool.query(`${ISSUE_Q} WHERE 1=1 ${archCond} AND (NOT i.private OR i.owner_id=$1) ORDER BY i.archived ASC, i.due_date ASC NULLS LAST, i.created_at DESC`, [uid]);
       return q.rows;
     },
-    getById: async (id) => (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null,
+    // currentUserId, when provided, enforces the same private-issue gate as
+    // getAll: a private row owned by someone else returns null. Internal
+    // callers (create, update, etc.) can omit it to bypass the check.
+    getById: async (id, currentUserId) => {
+      const row = (await pool.query(`${ISSUE_Q} WHERE i.id=$1`, [id])).rows[0] ?? null;
+      if (row && currentUserId !== undefined && row.private && row.owner_id !== currentUserId) return null;
+      return row;
+    },
     create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source, rock_id }) => {
       const { rows } = await pool.query(
         'INSERT INTO issues (title,description,owner_id,status,priority,due_date,private,source,rock_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
@@ -1672,7 +1679,12 @@ if (USE_PG) {
         .map(enrichIssue)
         .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || dueCmp(a, b) || b.created_at.localeCompare(a.created_at));
     },
-    getById: async (id) => { const i = db.issues.find(i => i.id === +id); return i ? enrichIssue(i) : null; },
+    getById: async (id, currentUserId) => {
+      const i = db.issues.find(i => i.id === +id);
+      if (!i) return null;
+      if (currentUserId !== undefined && i.private && i.owner_id !== +currentUserId) return null;
+      return enrichIssue(i);
+    },
     create: async ({ title, description, owner_id, priority, due_date, private: isPrivate, source, rock_id }) => {
       const issue = { id: nextId('issues'), title, description: description || null,
         owner_id: owner_id ? +owner_id : null, status: 'in_progress', priority: priority || 'medium',

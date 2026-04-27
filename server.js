@@ -500,18 +500,21 @@ app.get('/api/cron/promote-milestones', requireCronSecret, wrap(async (req, res)
 app.use('/api', requireAuth);
 
 // ── Users ────────────────────────────────────────────────────────────────────
+// GET stays member-readable (team picker, owner filter, etc.).
+// Mutations are owner-only — without this gate any signed-in member could
+// rename or delete Logan/Jude.
 app.get('/api/users', wrap(async (req, res) => ok(res, await userQueries.getAll())));
-app.post('/api/users', wrap(async (req, res) => {
+app.post('/api/users', requireOwner, wrap(async (req, res) => {
   const { name, color } = req.body;
   if (!name) return fail(res, 'name is required');
   ok(res, await userQueries.create(name.trim(), color));
 }));
-app.put('/api/users/:id', wrap(async (req, res) => {
+app.put('/api/users/:id', requireOwner, wrap(async (req, res) => {
   const { name, color } = req.body;
   if (!name) return fail(res, 'name is required');
   ok(res, await userQueries.update(req.params.id, name.trim(), color));
 }));
-app.delete('/api/users/:id', wrap(async (req, res) => {
+app.delete('/api/users/:id', requireOwner, wrap(async (req, res) => {
   await userQueries.delete(req.params.id);
   ok(res, { deleted: true });
 }));
@@ -1076,11 +1079,17 @@ app.post('/api/issues', wrap(async (req, res) => {
   ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate, rock_id }));
 }));
 app.put('/api/issues/:id', wrap(async (req, res) => {
+  // Block mutation of another user's private to-do. Public to-dos stay
+  // team-editable. 404 (not 403) so we don't leak that the row exists.
+  const existing = await issueQueries.getById(req.params.id, req.userId);
+  if (!existing) return fail(res, 'to-do not found', 404);
   if (!allow(req.body.status, STATUS_ISSUE)) return fail(res, `status must be one of ${STATUS_ISSUE.join(', ')}`);
   if (!allow(req.body.priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
   ok(res, await issueQueries.update(req.params.id, req.body));
 }));
 app.delete('/api/issues/:id', wrap(async (req, res) => {
+  const existing = await issueQueries.getById(req.params.id, req.userId);
+  if (!existing) return fail(res, 'to-do not found', 404);
   await issueQueries.delete(req.params.id);
   ok(res, { deleted: true });
 }));
