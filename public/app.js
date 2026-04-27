@@ -2216,7 +2216,12 @@ document.addEventListener('keydown', e => {
 /* ── XSS protection ──────────────────────────────────────────────── */
 function esc(str) {
   if (!str) return '';
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -4115,7 +4120,7 @@ async function syncQb() {
       if (link) link.onclick = (e) => { e.preventDefault(); openMapQbModal(); };
     }
   } catch (e) {
-    if (status) status.innerHTML = `<span class="budget-msg-err">Sync failed: ${e.message}</span>`;
+    if (status) status.innerHTML = `<span class="budget-msg-err">Sync failed: ${esc(e.message)}</span>`;
   }
 }
 
@@ -4216,7 +4221,7 @@ async function openMapQbModal() {
         closeModal('map-qb-modal');
         await loadBudget();
       } catch (e) {
-        if (msg) msg.innerHTML = `<span class="form-msg-err">Save failed: ${e.message}</span>`;
+        if (msg) msg.innerHTML = `<span class="form-msg-err">Save failed: ${esc(e.message)}</span>`;
       }
     };
 
@@ -4242,13 +4247,13 @@ async function openMapQbModal() {
         // Re-open modal — refresh dropdowns from the new state
         await openMapQbModal();
       } catch (e) {
-        if (msg) msg.innerHTML = `<span class="form-msg-err">Auto-map failed: ${e.message}</span>`;
+        if (msg) msg.innerHTML = `<span class="form-msg-err">Auto-map failed: ${esc(e.message)}</span>`;
       } finally {
         autoBtn.disabled = false;
       }
     };
   } catch (e) {
-    if (body) body.innerHTML = `<p class="form-msg-err">Failed to load QB accounts: ${e.message}</p>`;
+    if (body) body.innerHTML = `<p class="form-msg-err">Failed to load QB accounts: ${esc(e.message)}</p>`;
   }
 }
 
@@ -4531,7 +4536,7 @@ async function rebuildBudgetFromQb() {
     state.lastRebuildReport = result;
     console.log('Rebuild report', result);
   } catch (e) {
-    if (status) status.innerHTML = `<span class="budget-msg-err">Rebuild failed: ${e.message}</span>`;
+    if (status) status.innerHTML = `<span class="budget-msg-err">Rebuild failed: ${esc(e.message)}</span>`;
   }
 }
 

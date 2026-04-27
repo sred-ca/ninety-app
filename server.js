@@ -10,7 +10,14 @@ const PORT = process.env.PORT || 3000;
 // ── Stateless HMAC-signed cookie auth ────────────────────────────────────────
 // No session store needed — userId is signed with a secret and stored in a
 // cookie. Works reliably in serverless environments (no DB round-trip for auth).
-const COOKIE_NAME   = 'ninety_auth';
+const COOKIE_NAME = 'ninety_auth';
+// Refuse to boot in production without a real SESSION_SECRET. Without this
+// guard, a misconfigured prod deploy would silently sign cookies with the
+// publicly-visible dev fallback string, letting anyone forge a session.
+const IS_PROD = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
+if (IS_PROD && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET must be set in production. Refusing to boot with the dev fallback secret.');
+}
 const COOKIE_SECRET = process.env.SESSION_SECRET || 'ninety-dev-secret-change-me';
 
 // Server-side cookie lifetime (must match the cookie's maxAge below). The
@@ -112,7 +119,7 @@ app.get('/auth/google', (req, res) => {
   const state = crypto.randomBytes(24).toString('base64url');
   res.cookie(GOOG_STATE_COOKIE, state, {
     httpOnly: true,
-    secure:   !!process.env.VERCEL,
+    secure:   IS_PROD,
     sameSite: 'lax',
     maxAge:   10 * 60 * 1000, // 10 min — enough for slow MFA
   });
@@ -193,7 +200,7 @@ app.get('/auth/google/callback', async (req, res) => {
     // Set stateless HMAC-signed cookie (works in serverless — no session store needed)
     res.cookie(COOKIE_NAME, makeAuthCookie(user.id), {
       httpOnly: true,
-      secure: !!process.env.VERCEL,
+      secure: IS_PROD,
       sameSite: 'lax',
       maxAge: AUTH_COOKIE_MAX_AGE_MS,
     });
@@ -249,7 +256,7 @@ app.get('/auth/quickbooks', (req, res) => {
       const state = qb.makeState();
       res.cookie(QB_STATE_COOKIE, state, {
         httpOnly: true,
-        secure:   !!process.env.VERCEL,
+        secure:   IS_PROD,
         sameSite: 'lax',
         maxAge:   10 * 60 * 1000, // 10 min
       });
