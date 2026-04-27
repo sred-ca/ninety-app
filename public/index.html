@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=18" />
+  <link rel="stylesheet" href="style.css?v=19" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -742,11 +742,17 @@
           </div>
         </div>
         <div id="runner-issues-panel" class="runner-issues-panel" hidden>
-          <div class="runner-issues-header">Short-term issues</div>
+          <div class="runner-issues-header">
+            <span>Short-term issues</span>
+            <button id="runner-add-issue-btn" class="btn btn-sm btn-primary" type="button">+ Add Issue</button>
+          </div>
           <div id="runner-issues-list" class="runner-issues-list"></div>
         </div>
         <div id="runner-todos-panel" class="runner-issues-panel" hidden>
-          <div class="runner-issues-header">Attendee to-dos</div>
+          <div class="runner-issues-header">
+            <span>Attendee to-dos</span>
+            <button id="runner-add-todo-btn" class="btn btn-sm btn-primary" type="button">+ Add To-Do</button>
+          </div>
           <div id="runner-todos-controls"></div>
           <div id="runner-todos-list" class="runner-issues-list"></div>
         </div>

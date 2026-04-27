@@ -1249,6 +1249,10 @@ textarea { resize: vertical; min-height: 72px; }
   padding: 16px 18px;
 }
 .runner-issues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1256,6 +1260,8 @@ textarea { resize: vertical; min-height: 72px; }
   color: var(--text2);
   margin-bottom: 12px;
 }
+#issue-modal.modal-overlay,
+#team-issue-modal.modal-overlay { z-index: 2500; }
 .runner-issues-list { display: flex; flex-direction: column; gap: 10px; }
 
 /* Runner to-dos: filter chips + column headers */

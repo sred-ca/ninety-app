@@ -1067,7 +1067,8 @@ qs('#save-issue-btn').addEventListener('click', async () => {
       await api.post('/api/issues', body);
     }
     closeModal('issue-modal');
-    loadIssues();
+    await loadIssues();
+    if (state.runner && state.runner.active) updateRunnerDisplay();
   } catch (e) { alert(e.message); }
 });
 
@@ -1314,7 +1315,8 @@ qs('#save-team-issue-btn').addEventListener('click', async () => {
       await api.post('/api/team-issues', body);
     }
     closeModal('team-issue-modal');
-    loadTeamIssues();
+    await loadTeamIssues();
+    if (state.runner && state.runner.active) updateRunnerDisplay();
   } catch (e) { alert(e.message); }
 });
 
@@ -2130,6 +2132,15 @@ function renderRunnerTodosHeader(shown, total) {
     });
   });
 }
+
+qs('#runner-add-issue-btn').addEventListener('click', () => {
+  // Default the new issue to short_term so it appears in this runner panel.
+  state.teamIssueHorizonFilter = 'short_term';
+  openTeamIssueModal(null);
+});
+qs('#runner-add-todo-btn').addEventListener('click', () => {
+  openIssueModal(null);
+});
 
 qs('#runner-playpause-btn').addEventListener('click', () => {
   state.runner.playing = !state.runner.playing;
