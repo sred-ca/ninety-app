@@ -524,6 +524,37 @@ body {
   min-height: 4px; /* keeps spacing even when empty */
 }
 
+/* ── Linked-rock chip on a to-do (card + row views) ───────────────── */
+.issue-rock-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text2);
+  background: var(--accent-bg, rgba(99, 102, 241, 0.12));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  max-width: 220px;
+}
+.issue-rock-chip svg { width: 11px; height: 11px; flex-shrink: 0; opacity: 0.85; }
+.issue-rock-chip span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.issue-rock-chip.from-milestone {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.30);
+  color: #34d399;
+}
+.issue-row-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.issue-row-title-wrap .issue-rock-chip { align-self: flex-start; }
+
 /* ── Due date chip ────────────────────────────────────────────────── */
 .due-date-chip {
   display: inline-flex;

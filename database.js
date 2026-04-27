@@ -260,6 +260,17 @@ if (USE_PG) {
       UPDATE issues SET status='blocker'     WHERE status='discussing';
       ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'in_progress';
     `);
+    // Backfill milestone-promoted to-dos that earlier cron runs created with
+    // source='manual' and rock_id=NULL. Idempotent: the WHERE clause excludes
+    // already-correct rows, so subsequent boots are no-ops.
+    await pool.query(`
+      UPDATE issues i
+         SET source = 'milestone',
+             rock_id = COALESCE(i.rock_id, m.rock_id)
+        FROM rock_milestones m
+       WHERE i.source_milestone_id = m.id
+         AND (i.source IS DISTINCT FROM 'milestone' OR i.rock_id IS NULL);
+    `);
 
     // No seed users — accounts are created via Google OAuth on first login.
 
@@ -595,7 +606,7 @@ if (USE_PG) {
   `;
   const ISSUE_Q = `
     SELECT i.id, i.title, i.description, i.owner_id, i.status, i.priority,
-           i.archived, i.private, i.due_date, i.source, i.rock_id,
+           i.archived, i.private, i.due_date, i.source, i.rock_id, i.source_milestone_id,
            i.created_at, i.updated_at,
            u.name AS owner_name, u.color AS owner_color, u.picture AS owner_picture
     FROM issues i LEFT JOIN users u ON i.owner_id = u.id
@@ -1227,9 +1238,9 @@ if (USE_PG) {
         for (const m of due) {
           const ownerId = m.owner_id ?? m.rock_owner_id ?? null;
           await client.query(
-            `INSERT INTO issues (title, description, owner_id, status, priority, due_date, private, source, source_milestone_id)
-             VALUES ($1, $2, $3, 'in_progress', 'medium', $4, FALSE, 'manual', $5)`,
-            [m.title, `Milestone for rock: ${m.rock_title}`, ownerId, m.due_date, m.id]
+            `INSERT INTO issues (title, description, owner_id, status, priority, due_date, private, source, source_milestone_id, rock_id)
+             VALUES ($1, $2, $3, 'in_progress', 'medium', $4, FALSE, 'milestone', $5, $6)`,
+            [m.title, `Milestone for rock: ${m.rock_title}`, ownerId, m.due_date, m.id, m.rock_id]
           );
           await client.query(
             'UPDATE rock_milestones SET promoted_to_todo_at = NOW() WHERE id = $1',
@@ -1687,6 +1698,18 @@ if (USE_PG) {
   if (!db.meetings)      { db.meetings = []; }
   if (!db.team_issues)   { db.team_issues = []; }
   if (!db.rock_milestones) { db.rock_milestones = []; }
+  // Backfill milestone-promoted to-dos that were earlier created with
+  // source='manual' / rock_id=null (the bug pre-fix). Idempotent.
+  {
+    let dirty = false;
+    for (const i of (db.issues || [])) {
+      if (i.source_milestone_id == null) continue;
+      const m = db.rock_milestones.find(rm => rm.id === i.source_milestone_id);
+      if (i.source !== 'milestone') { i.source = 'milestone'; dirty = true; }
+      if (i.rock_id == null && m && m.rock_id != null) { i.rock_id = m.rock_id; dirty = true; }
+    }
+    if (dirty) persist(db);
+  }
   if (!db._seq.agendas)  { db._seq.agendas = 0; }
   if (!db._seq.agenda_sections) { db._seq.agenda_sections = 0; }
   if (!db._seq.meetings) { db._seq.meetings = 0; }
@@ -2100,8 +2123,9 @@ if (USE_PG) {
           archived: false,
           private: false,
           due_date: m.due_date,
-          source: 'manual',
+          source: 'milestone',
           source_milestone_id: m.id,
+          rock_id: m.rock_id,
           created_at: nowStr(),
           updated_at: nowStr(),
         };

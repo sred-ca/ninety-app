@@ -3,6 +3,10 @@ const state = {
   currentUser: null,
   users: [],
   rocks: [],
+  // All rocks across every quarter — used by the to-do modal's Rock dropdown
+  // so users can link a to-do to a rock from any quarter, not just the current
+  // one. state.rocks above stays quarter-filtered for the Rocks page.
+  allRocks: [],
   issues: [],
   currentView: 'my90',
   my90Rocks: [],
@@ -290,6 +294,9 @@ async function loadRocks() {
   const url = state.quarterFilter ? `/api/rocks?quarter=${encodeURIComponent(state.quarterFilter)}` : '/api/rocks';
   state.rocks = await api.get(url);
   renderRocks();
+  // Keep the unfiltered cache fresh so the to-do modal's Rock dropdown
+  // reflects newly created/edited/deleted rocks without a page reload.
+  api.get('/api/rocks').then(rs => { state.allRocks = rs || []; }).catch(() => {});
 }
 
 function renderRocks() {
@@ -588,6 +595,23 @@ async function loadIssues() {
   renderIssues();
 }
 
+/* Small chip showing the linked Rock for a to-do, or '' when none. Renders a
+   "from milestone" variant when the to-do was auto-promoted from a milestone,
+   so users can tell at a glance whether the link is manual or generated. */
+function renderIssueRockChip(issue) {
+  if (!issue || !issue.rock_id) return '';
+  const rock = (state.allRocks || []).find(r => r.id === issue.rock_id);
+  if (!rock) return '';
+  const fromMilestone = issue.source === 'milestone';
+  const tip = fromMilestone
+    ? `Auto-promoted from a milestone on rock: ${rock.title} · ${rock.quarter}`
+    : `Linked to rock: ${rock.title} · ${rock.quarter}`;
+  const icon = fromMilestone
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+  return `<span class="issue-rock-chip ${fromMilestone ? 'from-milestone' : ''}" title="${esc(tip)}">${icon}<span>${esc(rock.title)}</span></span>`;
+}
+
 /* Build a single issue card DOM element */
 function buildIssueCard(issue) {
   const isArchived = !!issue.archived;
@@ -661,6 +685,8 @@ function buildIssueCard(issue) {
     ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;margin-right:6px;vertical-align:-1px;opacity:.7"><rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
     : '';
 
+  const rockChipHtml = renderIssueRockChip(issue);
+
   card.innerHTML = `
     <div class="issue-card-top">
       <div class="issue-priority-dot ${issue.priority}"></div>
@@ -669,6 +695,7 @@ function buildIssueCard(issue) {
     ${issue.description ? `<div class="issue-desc">${esc(issue.description)}</div>` : ''}
     <div class="issue-card-meta-row">
       ${dueDateHtml}
+      ${rockChipHtml}
       ${issue.owner_name ? `<span class="issue-owner-chip"></span>` : ''}
     </div>
     <div class="issue-card-bottom">
@@ -721,10 +748,15 @@ function buildIssueRow(issue) {
     ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;margin-right:6px;vertical-align:-1px;opacity:.7"><rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
     : '';
 
+  const rockChipHtml = renderIssueRockChip(issue);
+
   row.innerHTML = `
     <div class="issue-title-cell">
       <div class="issue-priority-dot ${issue.priority}" style="margin-right:8px;flex-shrink:0"></div>
-      <div class="issue-row-title">${privateMark}${esc(issue.title)}</div>
+      <div class="issue-row-title-wrap">
+        <div class="issue-row-title">${privateMark}${esc(issue.title)}</div>
+        ${rockChipHtml}
+      </div>
     </div>
     <div class="issue-row-owner"></div>
     <div class="issue-row-due">${due ? `<span class="due-date-chip due-${due.urgency}">${due.text}</span>` : '<span style="color:var(--text2)">—</span>'}</div>
@@ -1023,18 +1055,17 @@ function openIssueModal(editId) {
     state.users.map(u => `<option value="${u.id}" ${issue && issue.owner_id === u.id ? 'selected' : ''}>${u.name}</option>`).join('');
   if (!issue) ownerSel.value = state.currentUser ? state.currentUser.id : '';
 
-  // Populate Rock dropdown — rocks for the current quarter, plus the rock
-  // this to-do is already linked to (if it's from a different quarter).
+  // Populate Rock dropdown from every quarter's rocks so users can link a
+  // to-do to any rock — current, future, or past. Sorted current-quarter
+  // first, then by quarter desc, so the most relevant options come up top.
   const rockSel = qs('#issue-rock');
   const goalIndexById = new Map((state.vto?.one_year_goals || []).map((g, i) => [g.id, i + 1]));
-  const allRocks = state.rocks || [];
   const cq = currentQuarter();
-  const rocksForPicker = [
-    ...allRocks.filter(r => r.quarter === cq),
-    ...(issue && issue.rock_id && allRocks.find(r => r.id === issue.rock_id && r.quarter !== cq)
-        ? [allRocks.find(r => r.id === issue.rock_id)]
-        : []),
-  ];
+  const rocksForPicker = [...(state.allRocks || [])].sort((a, b) => {
+    if (a.quarter === cq && b.quarter !== cq) return -1;
+    if (b.quarter === cq && a.quarter !== cq) return 1;
+    return (b.quarter || '').localeCompare(a.quarter || '') || (a.title || '').localeCompare(b.title || '');
+  });
   rockSel.innerHTML = '<option value="">— No rock —</option>' +
     rocksForPicker.map(r => {
       const goalNum = r.goal_id ? goalIndexById.get(r.goal_id) : null;
@@ -4706,6 +4737,8 @@ async function loadAll() {
     // first navigating to the V/TO tab. Falls back to {} on failure (e.g.
     // no permission) so callers can read .one_year_goals safely.
     api.get('/api/vto').then(v => { state.vto = v || {}; }).catch(() => { state.vto = {}; }),
+    // All rocks across every quarter — feeds the to-do modal's Rock dropdown.
+    api.get('/api/rocks').then(rs => { state.allRocks = rs || []; }).catch(() => { state.allRocks = []; }),
   ]);
 }
 
