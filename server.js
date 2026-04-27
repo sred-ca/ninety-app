@@ -97,6 +97,7 @@ function allow(value, allowed) {
 }
 const STATUS_ISSUE   = ['in_progress', 'waiting_for', 'blocker', 'solved'];
 const STATUS_ROCK    = ['not_started', 'on_track', 'off_track', 'done'];
+const STATUS_MEETING = ['upcoming', 'in_progress', 'completed'];
 const PRIORITY_VALS  = ['low', 'medium', 'high'];
 const HORIZON_VALS   = ['short_term', 'long_term'];
 
@@ -584,7 +585,8 @@ app.delete('/api/users/:id', requireOwner, wrap(async (req, res) => {
 // display consistency, but the database row count stays zero.
 app.get('/api/admin/tab-access', requireOwner, wrap(async (req, res) => {
   const [users, allGrants] = await Promise.all([
-    userQueries.getAll(),
+    // Owner-only matrix needs email + role; the public getAll projects them out.
+    userQueries.getAllForAdmin(),
     tabAccessQueries.listAll(),
   ]);
   const out = users.map(u => {
@@ -1223,7 +1225,14 @@ app.post('/api/meetings', wrap(async (req, res) => {
   if (!title) return fail(res, 'title is required');
   ok(res, await meetingQueries.create({ agenda_id, title, scheduled_at, sections_snapshot, attendee_ids }));
 }));
-app.put('/api/meetings/:id', wrap(async (req, res) => ok(res, await meetingQueries.update(req.params.id, req.body))));
+app.put('/api/meetings/:id', wrap(async (req, res) => {
+  // Validate enum so a member can't flip a finished meeting back to upcoming
+  // (which would re-open attendee edits) by sending arbitrary status text.
+  if (!allow(req.body.status, STATUS_MEETING)) {
+    return fail(res, `status must be one of ${STATUS_MEETING.join(', ')}`);
+  }
+  ok(res, await meetingQueries.update(req.params.id, req.body));
+}));
 // Replace the attendee list. Frozen once the meeting goes in_progress (or later).
 app.put('/api/meetings/:id/attendees', wrap(async (req, res) => {
   const meeting = await meetingQueries.getById(req.params.id);

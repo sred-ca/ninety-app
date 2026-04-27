@@ -909,10 +909,15 @@ function renderIssues() {
   }
 
   // ── Events ────────────────────────────────────────────────────────
+  // Each handler awaits the PUT inside a try/catch so a failed request
+  // (network blip, 403 on someone else's private to-do, validation error)
+  // surfaces an alert instead of failing silently. The list refresh runs
+  // either way so the row snaps back to its real server state on error.
   qsa('.delete-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' });
+      try { await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' }); }
+      catch (err) { alert(err.message); }
       loadIssues();
     });
   });
@@ -920,7 +925,8 @@ function renderIssues() {
   qsa('.solve-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' });
+      try { await api.put(`/api/issues/${btn.dataset.id}`, { status: 'solved' }); }
+      catch (err) { alert(err.message); }
       loadIssues();
     });
   });
@@ -928,7 +934,8 @@ function renderIssues() {
   qsa('.archive-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await api.put(`/api/issues/${btn.dataset.id}`, { archived: true });
+      try { await api.put(`/api/issues/${btn.dataset.id}`, { archived: true }); }
+      catch (err) { alert(err.message); }
       loadIssues();
     });
   });
@@ -936,7 +943,8 @@ function renderIssues() {
   qsa('.unarchive-issue-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await api.put(`/api/issues/${btn.dataset.id}`, { archived: false });
+      try { await api.put(`/api/issues/${btn.dataset.id}`, { archived: false }); }
+      catch (err) { alert(err.message); }
       loadIssues();
     });
   });
@@ -945,7 +953,8 @@ function renderIssues() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const makePrivate = btn.dataset.private !== '1';
-      await api.put(`/api/issues/${btn.dataset.id}`, { private: makePrivate });
+      try { await api.put(`/api/issues/${btn.dataset.id}`, { private: makePrivate }); }
+      catch (err) { alert(err.message); }
       loadIssues();
     });
   });

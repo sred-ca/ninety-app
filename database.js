@@ -613,7 +613,15 @@ if (USE_PG) {
   `;
 
   const userQueries = {
-    getAll: async () => (await pool.query('SELECT * FROM users ORDER BY name')).rows,
+    // Member-readable: projects only fields the team picker / avatar UI needs.
+    // Email, role, coaching_phone, coaching_enabled are PII and stay out of
+    // this response. Owner-only callers should use getAllForAdmin().
+    getAll: async () => (await pool.query(
+      'SELECT id, name, color, picture FROM users ORDER BY name'
+    )).rows,
+    getAllForAdmin: async () => (await pool.query(
+      'SELECT id, name, color, picture, email, role FROM users ORDER BY name'
+    )).rows,
     getById: async (id) => (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0] ?? null,
     getByEmail: async (email) => (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0] ?? null,
     getByCoachingPhone: async (phone) => (await pool.query('SELECT * FROM users WHERE coaching_phone=$1', [phone])).rows[0] ?? null,
@@ -1623,7 +1631,13 @@ if (USE_PG) {
   const initDb = async () => {};  // no-op in JSON mode
 
   const userQueries = {
-    getAll:   async () => [...db.users].sort((a,b) => a.name.localeCompare(b.name)),
+    // Member-readable projection. Email/role/coaching_* stay out — see PG note.
+    getAll: async () => [...db.users]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(u => ({ id: u.id, name: u.name, color: u.color, picture: u.picture })),
+    getAllForAdmin: async () => [...db.users]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(u => ({ id: u.id, name: u.name, color: u.color, picture: u.picture, email: u.email, role: u.role })),
     getById:  async (id) => db.users.find(u => u.id === +id) ?? null,
     getByEmail: async (email) => db.users.find(u => u.email === email) ?? null,
     getByCoachingPhone: async (phone) => db.users.find(u => u.coaching_phone === phone) ?? null,
