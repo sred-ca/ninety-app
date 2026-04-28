@@ -175,7 +175,9 @@ app.get('/auth/google/callback', async (req, res) => {
     });
     const tokens = await tokenRes.json();
     if (!tokens.access_token) {
-      console.error('Token exchange failed:', JSON.stringify(tokens));
+      // Log status + error code only — the full response can include partial
+      // token info on Google's side and lands in Vercel logs forever.
+      console.error('Token exchange failed:', tokenRes.status, tokens.error || tokens.error_description || 'unknown');
       return res.redirect('/?error=token_exchange');
     }
 

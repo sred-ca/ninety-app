@@ -66,7 +66,10 @@ async function exchangeCode(code) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.access_token) {
-    throw new Error(`QB token exchange failed: ${res.status} ${JSON.stringify(body)}`);
+    // Surface only error code in the message — body can include partial
+    // tokens on transient failures and the full Error message bubbles into
+    // Vercel logs.
+    throw new Error(`QB token exchange failed: ${res.status} ${body.error || body.error_description || 'unknown'}`);
   }
   return body; // { access_token, refresh_token, token_type, expires_in, x_refresh_token_expires_in }
 }
@@ -87,7 +90,7 @@ async function refreshAccessToken(refresh_token) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.access_token) {
-    throw new Error(`QB refresh failed: ${res.status} ${JSON.stringify(body)}`);
+    throw new Error(`QB refresh failed: ${res.status} ${body.error || body.error_description || 'unknown'}`);
   }
   return body;
 }

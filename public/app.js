@@ -165,6 +165,20 @@ function periodDateRange(period) {
   return { start: new Date(0), end: new Date(9999, 0) };
 }
 
+/* Guard a click handler so a fast double-click can't fire its async body
+   twice. Disables the button for the duration of the async work, re-enables
+   on settle. Use sparingly — only on confirm/create handlers where a
+   duplicate POST has user-visible consequences. */
+function withClickGuard(fn) {
+  return async function (e) {
+    const btn = e && e.currentTarget;
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
+    try { await fn.call(this, e); }
+    finally { if (btn) btn.disabled = false; }
+  };
+}
+
 /* Add N business days to today, return YYYY-MM-DD string */
 function addBusinessDays(n) {
   const d = new Date();
@@ -174,13 +188,23 @@ function addBusinessDays(n) {
     const dow = d.getDay();
     if (dow !== 0 && dow !== 6) added++;
   }
-  return d.toISOString().slice(0, 10);
+  // Use local-tz formatting so the resulting due date matches what the user
+  // sees in their calendar — toISOString() shifts by ±1 day off-UTC.
+  return localDateISO(d);
 }
 
 /* Format a YYYY-MM-DD due date for display; returns {text, urgency} */
+// Build YYYY-MM-DD in the user's local timezone. Using `.toISOString()` for
+// "today" silently shifts by ±1 day in any timezone east or west of UTC —
+// so a to-do due May 1 in Mountain time would read "Tomorrow" all evening
+// on Apr 30. Always compare local-to-local.
+function localDateISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function formatDueDate(dateStr) {
   if (!dateStr) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateISO();
   const due   = dateStr.slice(0, 10);
   const [y, m, d] = due.split('-').map(Number);
   // Format as "Apr 15"
@@ -189,7 +213,7 @@ function formatDueDate(dateStr) {
   if (due === today) return { text: 'Today', urgency: 'today' };
   // Check if tomorrow
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-  if (due === tomorrow.toISOString().slice(0, 10)) return { text: 'Tomorrow', urgency: 'soon' };
+  if (due === localDateISO(tomorrow)) return { text: 'Tomorrow', urgency: 'soon' };
   return { text: label, urgency: 'normal' };
 }
 
@@ -533,7 +557,7 @@ function buildMilestoneRow(m) {
   return row;
 }
 
-qs('#add-milestone-btn').addEventListener('click', async () => {
+qs('#add-milestone-btn').addEventListener('click', withClickGuard(async () => {
   const rockId = state.currentMilestoneRockId;
   if (!rockId) return;
   const rock = state.rocks.find(r => r.id === rockId);
@@ -550,7 +574,7 @@ qs('#add-milestone-btn').addEventListener('click', async () => {
     const lastInput = rows[rows.length - 1]?.querySelector('.milestone-title-input');
     if (lastInput) { lastInput.focus(); lastInput.select(); }
   } catch (e) { alert(e.message); }
-});
+}));
 
 // Progress slider live update
 qs('#rock-progress').addEventListener('input', () => {
@@ -1613,14 +1637,14 @@ qs('#start-meeting-btn').addEventListener('click', () => {
   renderAttendeePicker(qs('#pick-attendees'), seed);
   openModal('pick-agenda-modal');
 });
-qs('#confirm-start-meeting-btn').addEventListener('click', async () => {
+qs('#confirm-start-meeting-btn').addEventListener('click', withClickGuard(async () => {
   const agendaId = +qs('#pick-agenda-select').value;
   const agenda = state.agendas.find(a => a.id === agendaId);
   if (!agenda) return;
   const attendeeIds = collectAttendees(qs('#pick-attendees'));
   closeModal('pick-agenda-modal');
   await startRunner(agendaId, agenda.title, null, attendeeIds);
-});
+}));
 
 const schedBtn = qs('#schedule-meeting-btn-empty');
 if (schedBtn) schedBtn.addEventListener('click', () => {
@@ -1630,7 +1654,7 @@ if (schedBtn) schedBtn.addEventListener('click', () => {
   openModal('schedule-meeting-modal');
 });
 
-qs('#confirm-schedule-btn').addEventListener('click', async () => {
+qs('#confirm-schedule-btn').addEventListener('click', withClickGuard(async () => {
   const agendaId = +qs('#schedule-agenda-select').value;
   const agenda = state.agendas.find(a => a.id === agendaId);
   const dt = qs('#schedule-datetime').value;
@@ -1645,7 +1669,7 @@ qs('#confirm-schedule-btn').addEventListener('click', async () => {
   });
   closeModal('schedule-meeting-modal');
   loadMeetings();
-});
+}));
 
 /* ── Past meetings ───────────────────────────────────────────────── */
 function renderMeetingsPast() {
@@ -1734,11 +1758,11 @@ function renderAgendasList() {
 }
 
 /* ── Create agenda ───────────────────────────────────────────────── */
-qs('#create-agenda-btn').addEventListener('click', async () => {
+qs('#create-agenda-btn').addEventListener('click', withClickGuard(async () => {
   const a = await api.post('/api/agendas', { title: 'New Agenda' });
   state.agendas.unshift(a);
   openAgendaEditor(a.id);
-});
+}));
 
 /* ── Agenda editor ───────────────────────────────────────────────── */
 async function openAgendaEditor(agendaId) {
@@ -1817,7 +1841,7 @@ function renderAgendaSections() {
   });
 }
 
-qs('#add-section-btn').addEventListener('click', async () => {
+qs('#add-section-btn').addEventListener('click', withClickGuard(async () => {
   const sort = state.currentAgendaSections.length;
   const sec = await api.post(`/api/agendas/${state.currentAgendaId}/sections`, {
     name: 'New Section', duration_minutes: 5, visible: true, sort_order: sort,
@@ -1827,7 +1851,7 @@ qs('#add-section-btn').addEventListener('click', async () => {
   // Focus the new name input
   const inputs = qsa('#agenda-sections-list .section-name-input');
   if (inputs.length) inputs[inputs.length - 1].focus();
-});
+}));
 
 qs('#save-agenda-btn').addEventListener('click', async () => {
   const title = qs('#agenda-title-input').value.trim() || 'Untitled Agenda';
@@ -1975,7 +1999,7 @@ function renderRunnerIssuesPanel(sec) {
   // Short-term, non-archived, unsolved; sort by rank asc NULLS last, then created_at desc.
   const items = (state.teamIssues || [])
     .filter(t => t.horizon === 'short_term' && !t.archived && t.status !== 'solved')
-    .sort((a, b) => (a.top_rank ?? 99) - (b.top_rank ?? 99) || b.created_at.localeCompare(a.created_at));
+    .sort((a, b) => (a.top_rank ?? 99) - (b.top_rank ?? 99) || (b.created_at || '').localeCompare(a.created_at || ''));
 
   if (items.length === 0) {
     list.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px 2px">No short-term issues yet.</div>';
@@ -2241,19 +2265,22 @@ async function loadMy90() {
   const in90Str = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
   const uid = state.currentUser?.id;
 
+  // Each fetch falls back to [] on failure so a single backend hiccup
+  // doesn't blank the whole My 90 dashboard. Errors are logged and the
+  // page renders whatever data did load.
   const [allRocks, allIssues, allMeetings, vto] = await Promise.all([
-    api.get('/api/rocks?quarter=' + encodeURIComponent(currentQuarter())),
-    api.get('/api/issues'),
-    api.get('/api/meetings'),
+    api.get('/api/rocks?quarter=' + encodeURIComponent(currentQuarter())).catch(e => { console.error('my90 rocks:', e); return []; }),
+    api.get('/api/issues').catch(e => { console.error('my90 issues:', e); return []; }),
+    api.get('/api/meetings').catch(e => { console.error('my90 meetings:', e); return []; }),
     api.get('/api/vto').catch(() => null),  // V/TO is optional; render without it on failure
   ]);
   state.my90Vto = vto;
 
-  state.my90Rocks    = allRocks.filter(r => r.owner_id === uid);
-  state.my90Issues   = allIssues.filter(i =>
+  state.my90Rocks    = (allRocks || []).filter(r => r.owner_id === uid);
+  state.my90Issues   = (allIssues || []).filter(i =>
     i.owner_id === uid && !i.archived && i.status !== 'solved'
   );
-  state.my90Meetings = allMeetings.filter(m =>
+  state.my90Meetings = (allMeetings || []).filter(m =>
     m.status === 'upcoming' && m.scheduled_at && m.scheduled_at.slice(0, 10) <= in90Str
   );
 
@@ -2268,7 +2295,7 @@ function renderMy90() {
   const u = state.currentUser;
   if (u) {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    qs('#my90-subtitle').textContent = `${u.name.split(' ')[0]}'s workspace · ${today}`;
+    qs('#my90-subtitle').textContent = `${u.name?.split(' ')[0] || '—'}'s workspace · ${today}`;
   }
 
   // Helper: navigate to another tab
@@ -2354,7 +2381,7 @@ function renderMy90() {
         ${goals.map((g, i) => {
           const owners = goalOwners(g);
           const ownerHtml = owners.length
-            ? `<span class="my90-goal-owner">${owners.map(o => esc(o.name.split(' ')[0])).join(' · ')}</span>`
+            ? `<span class="my90-goal-owner">${owners.map(o => esc(o.name?.split(' ')[0] || '—')).join(' · ')}</span>`
             : '';
           return `
             <div class="my90-goal">
@@ -2422,7 +2449,7 @@ function renderMy90() {
   const blockerCount  = state.my90Issues.filter(i => i.status === 'blocker').length;
   const overdueCount  = state.my90Issues.filter(i => {
     if (!i.due_date) return false;
-    return i.due_date.slice(0, 10) < new Date().toISOString().slice(0, 10);
+    return i.due_date.slice(0, 10) < localDateISO();
   }).length;
 
   todosBox.innerHTML = `
@@ -2595,11 +2622,12 @@ async function loadInsights() {
     state.users.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
   ownerSel.value = state.insightsOwner;
 
-  // Fetch all data (client-side filtering)
+  // Fetch all data (client-side filtering). Per-fetch fallback so one
+  // failed endpoint doesn't blank the entire Insights tab.
   [state.insightsRocks, state.insightsTodos, state.insightsMeetings] = await Promise.all([
-    api.get('/api/rocks'),
-    api.get('/api/issues'),
-    api.get('/api/meetings'),
+    api.get('/api/rocks').catch(e => { console.error('insights rocks:', e); return []; }),
+    api.get('/api/issues').catch(e => { console.error('insights issues:', e); return []; }),
+    api.get('/api/meetings').catch(e => { console.error('insights meetings:', e); return []; }),
   ]);
 
   renderInsightsActiveTab();
@@ -4651,7 +4679,7 @@ function renderGoalCard(goal, idx) {
   const expanded = goalsState.expandedGoals.has(goal.id);
 
   const ownersHtml = owners.length
-    ? owners.map(o => `<span class="goal-owner">${esc(o.name.split(' ')[0])}</span>`).join('')
+    ? owners.map(o => `<span class="goal-owner">${esc(o.name?.split(' ')[0] || '—')}</span>`).join('')
     : '<span class="goal-owner goal-owner-empty">No owner</span>';
 
   // Sort rocks by quarter then status (done last)
@@ -4712,7 +4740,7 @@ function renderRockRow(rock) {
           <div class="goal-rock-title">${esc(rock.title)}</div>
           <div class="goal-rock-meta">
             <span class="goal-rock-quarter">${esc(rock.quarter || '')}</span>
-            ${owner ? `<span class="goal-owner">${esc(owner.name.split(' ')[0])}</span>` : ''}
+            ${owner ? `<span class="goal-owner">${esc(owner.name?.split(' ')[0] || '—')}</span>` : ''}
             <span class="${statusClass}">${statusLabel}</span>
             <span class="goal-rock-progress-text">${rock.progress || 0}%</span>
             ${todos.length ? `<span class="goal-rock-todos-count">${doneCount} / ${todos.length} to-do${todos.length === 1 ? '' : 's'}</span>` : ''}
@@ -4734,7 +4762,7 @@ function renderTodoRow(todo) {
       <span class="goal-todo-check">${done ? '✓' : '○'}</span>
       <span class="goal-todo-title">${esc(todo.title)}</span>
       ${todo.due_date ? `<span class="goal-todo-due">${formatDateShort(todo.due_date)}</span>` : ''}
-      ${owner ? `<span class="goal-owner">${esc(owner.name.split(' ')[0])}</span>` : ''}
+      ${owner ? `<span class="goal-owner">${esc(owner.name?.split(' ')[0] || '—')}</span>` : ''}
       <span class="goal-todo-status goal-todo-status--${todo.status}">${statusLabel}</span>
     </div>
   `;
