@@ -4,7 +4,58 @@
  *   PRODUCTION → Postgres via DATABASE_URL env var (Neon, Vercel Postgres, etc.)
  */
 
+const crypto = require('crypto');
+
 const USE_PG = !!process.env.DATABASE_URL;
+
+/* ── Token encryption (AES-256-GCM) ──────────────────────────────────────
+   QuickBooks access/refresh tokens stored in qb_connections are long-lived
+   bearer credentials — a leaked DB hands an attacker ~100 days of full
+   QuickBooks API access. Encrypt them at rest with a key from env.
+
+   Format on disk:   "v1.<iv-b64url>.<authTag-b64url>.<ciphertext-b64url>"
+   Migration:        legacy plaintext (no "v1." prefix) is returned as-is on
+                     read; next token refresh rewrites it in encrypted form.
+   Local dev:        if QBO_ENCRYPTION_KEY is unset, encrypt is a no-op
+                     (stores plaintext). Read still recognizes both forms. */
+const TOKEN_ENC_VERSION = 'v1';
+let _tokenKey;
+function getTokenKey() {
+  if (_tokenKey !== undefined) return _tokenKey;
+  const raw = process.env.QBO_ENCRYPTION_KEY;
+  if (!raw) { _tokenKey = null; return null; }
+  const buf = Buffer.from(raw, 'base64');
+  if (buf.length !== 32) {
+    throw new Error('QBO_ENCRYPTION_KEY must decode to exactly 32 bytes (44 base64 chars).');
+  }
+  _tokenKey = buf;
+  return _tokenKey;
+}
+function encryptToken(plaintext) {
+  if (plaintext == null) return plaintext;
+  const key = getTokenKey();
+  if (!key) return plaintext;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [TOKEN_ENC_VERSION, iv.toString('base64url'), tag.toString('base64url'), ct.toString('base64url')].join('.');
+}
+function decryptToken(value) {
+  if (value == null) return value;
+  if (typeof value !== 'string') return value;
+  if (!value.startsWith(`${TOKEN_ENC_VERSION}.`)) return value; // legacy plaintext
+  const key = getTokenKey();
+  if (!key) throw new Error('Encrypted token found but QBO_ENCRYPTION_KEY is not set.');
+  const [, ivB64, tagB64, ctB64] = value.split('.');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+  return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64url')), decipher.final()]).toString('utf8');
+}
+function decryptConnRow(row) {
+  if (!row) return row;
+  return { ...row, access_token: decryptToken(row.access_token), refresh_token: decryptToken(row.refresh_token) };
+}
 
 /* ══════════════════════════════════════════════════════════════════
    POSTGRES MODE
@@ -1464,12 +1515,14 @@ if (USE_PG) {
   // QuickBooks Online connection. One row per realm (company); in practice
   // SRED.ca has a single QB company so we'll typically see one row.
   const qbConnectionQueries = {
-    getActive: async () => (
-      await pool.query('SELECT * FROM qb_connections ORDER BY updated_at DESC LIMIT 1')
-    ).rows[0] ?? null,
-    getByRealm: async (realmId) => (
-      await pool.query('SELECT * FROM qb_connections WHERE realm_id=$1', [realmId])
-    ).rows[0] ?? null,
+    // All read paths decrypt before returning so callers (qb.js, sync routes)
+    // see plaintext tokens. All write paths encrypt before persisting.
+    getActive: async () => decryptConnRow(
+      (await pool.query('SELECT * FROM qb_connections ORDER BY updated_at DESC LIMIT 1')).rows[0] ?? null
+    ),
+    getByRealm: async (realmId) => decryptConnRow(
+      (await pool.query('SELECT * FROM qb_connections WHERE realm_id=$1', [realmId])).rows[0] ?? null
+    ),
     upsert: async ({ realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, connected_by_user_id }) => {
       const { rows } = await pool.query(
         `INSERT INTO qb_connections
@@ -1483,20 +1536,20 @@ if (USE_PG) {
            connected_by_user_id     = EXCLUDED.connected_by_user_id,
            updated_at               = NOW()
          RETURNING *`,
-        [realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at || null, connected_by_user_id || null]
+        [realm_id, encryptToken(access_token), encryptToken(refresh_token), access_token_expires_at, refresh_token_expires_at || null, connected_by_user_id || null]
       );
-      return rows[0];
+      return decryptConnRow(rows[0]);
     },
-    updateTokens: async (id, { access_token, refresh_token, access_token_expires_at, refresh_token_expires_at }) => (
-      await pool.query(
+    updateTokens: async (id, { access_token, refresh_token, access_token_expires_at, refresh_token_expires_at }) => decryptConnRow(
+      (await pool.query(
         `UPDATE qb_connections SET
            access_token=$1, refresh_token=$2,
            access_token_expires_at=$3, refresh_token_expires_at=$4,
            updated_at=NOW()
          WHERE id=$5 RETURNING *`,
-        [access_token, refresh_token, access_token_expires_at, refresh_token_expires_at || null, id]
-      )
-    ).rows[0] ?? null,
+        [encryptToken(access_token), encryptToken(refresh_token), access_token_expires_at, refresh_token_expires_at || null, id]
+      )).rows[0] ?? null
+    ),
     markSynced: async (id) => (
       await pool.query(
         'UPDATE qb_connections SET last_synced_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *', [id]
@@ -2393,25 +2446,30 @@ if (USE_PG) {
   if (!db.qb_connections) { db.qb_connections = []; persist(db); }
   if (!db._seq.qb_connections) db._seq.qb_connections = 0;
   const qbConnectionQueries = {
+    // Read paths return decrypted copies so callers see plaintext; the
+    // on-disk db.qb_connections row keeps the encrypted ciphertext.
     getActive: async () => {
       if (!db.qb_connections.length) return null;
-      return [...db.qb_connections].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+      const row = [...db.qb_connections].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+      return decryptConnRow(row);
     },
-    getByRealm: async (realmId) => db.qb_connections.find(c => c.realm_id === realmId) ?? null,
+    getByRealm: async (realmId) => decryptConnRow(db.qb_connections.find(c => c.realm_id === realmId) ?? null),
     upsert: async ({ realm_id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, connected_by_user_id }) => {
       const existing = db.qb_connections.find(c => c.realm_id === realm_id);
       if (existing) {
-        existing.access_token = access_token;
-        existing.refresh_token = refresh_token;
+        existing.access_token = encryptToken(access_token);
+        existing.refresh_token = encryptToken(refresh_token);
         existing.access_token_expires_at = access_token_expires_at;
         existing.refresh_token_expires_at = refresh_token_expires_at || null;
         existing.connected_by_user_id = connected_by_user_id || null;
         existing.updated_at = nowStr();
-        persist(db); return existing;
+        persist(db); return decryptConnRow(existing);
       }
       const conn = {
         id: nextId('qb_connections'),
-        realm_id, access_token, refresh_token,
+        realm_id,
+        access_token: encryptToken(access_token),
+        refresh_token: encryptToken(refresh_token),
         access_token_expires_at,
         refresh_token_expires_at: refresh_token_expires_at || null,
         connected_by_user_id: connected_by_user_id || null,
@@ -2419,16 +2477,16 @@ if (USE_PG) {
         created_at: nowStr(),
         updated_at: nowStr(),
       };
-      db.qb_connections.push(conn); persist(db); return conn;
+      db.qb_connections.push(conn); persist(db); return decryptConnRow(conn);
     },
     updateTokens: async (id, { access_token, refresh_token, access_token_expires_at, refresh_token_expires_at }) => {
       const c = db.qb_connections.find(x => x.id === +id); if (!c) return null;
-      c.access_token = access_token;
-      c.refresh_token = refresh_token;
+      c.access_token = encryptToken(access_token);
+      c.refresh_token = encryptToken(refresh_token);
       c.access_token_expires_at = access_token_expires_at;
       c.refresh_token_expires_at = refresh_token_expires_at || null;
       c.updated_at = nowStr();
-      persist(db); return c;
+      persist(db); return decryptConnRow(c);
     },
     markSynced: async (id) => {
       const c = db.qb_connections.find(x => x.id === +id); if (!c) return null;

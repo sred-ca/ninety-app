@@ -18,6 +18,12 @@ const IS_PROD = !!process.env.VERCEL || process.env.NODE_ENV === 'production';
 if (IS_PROD && !process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET must be set in production. Refusing to boot with the dev fallback secret.');
 }
+// QB tokens stored in the DB are AES-256-GCM encrypted with this key.
+// Required whenever QuickBooks credentials are configured — otherwise a
+// future deploy could silently store fresh tokens in plaintext.
+if (IS_PROD && process.env.QBO_CLIENT_ID && !process.env.QBO_ENCRYPTION_KEY) {
+  throw new Error('QBO_ENCRYPTION_KEY must be set when QuickBooks is configured. Refusing to boot.');
+}
 const COOKIE_SECRET = process.env.SESSION_SECRET || 'ninety-dev-secret-change-me';
 
 // Server-side cookie lifetime (must match the cookie's maxAge below). The
