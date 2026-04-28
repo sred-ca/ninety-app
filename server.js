@@ -947,11 +947,12 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
     return String(a.name).localeCompare(String(b.name));
   });
 
-  // ── Wipe + rebuild ──────────────────────────────────────────────
-  await budgetQueries.deleteAllForFiscalYear(fiscalYear);
-
-  const createdLines = [];
-  const skipped      = [];
+  // ── Compute the new layout entirely in memory first, then commit it
+  // atomically. Previously the wipe + per-line/cell INSERTs ran without a
+  // transaction, so a Vercel function timeout or pool drop mid-loop could
+  // leave the user's budget half-rebuilt with their manual entries gone.
+  const lineSpecs = [];
+  const skipped   = [];
   const sortCountBySection = {};
 
   for (const account of sorted) {
@@ -968,8 +969,7 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
     }
 
     sortCountBySection[section] = (sortCountBySection[section] || 0) + 1;
-    const line = await budgetQueries.createLine({
-      fiscal_year:   fiscalYear,
+    lineSpecs.push({
       section,
       category:      account.name,
       sort_order:    sortCountBySection[section] - 1,
@@ -977,27 +977,25 @@ app.post('/api/quickbooks/rebuild-budget', requireOwner, wrap(async (req, res) =
       notes:         target.type === 'target'
         ? `${fiscalYear} target ${target.value.toLocaleString('en-US', {style:'currency',currency:'USD',maximumFractionDigits:0})} — from plan`
         : `FY${fyNum - 1} actuals × ${target.value} growth factor`,
-    });
-
-    for (let i = 0; i < TARGET_MONTHS.length; i++) {
-      if (!fyMonthly[i]) continue;
-      await budgetQueries.upsertCell({
-        line_id:       line.id,
-        period_date:   TARGET_MONTHS[i],
-        budget_amount: fyMonthly[i],
-      });
-    }
-
-    createdLines.push({
-      id:             line.id,
-      category:       account.name,
-      section,
-      qb_account_id:  account.id,
-      prior_total:    Math.round(priorMonthly.reduce((a, b) => a + b, 0)),
-      fy_total:       fyMonthly.reduce((a, b) => a + b, 0),
-      target_or_factor: target,
+      cells: TARGET_MONTHS.map((p, i) => fyMonthly[i] ? { period_date: p, budget_amount: fyMonthly[i] } : null).filter(Boolean),
+      // Carry the report-shape metadata through so we can build the response below.
+      _reportMeta: {
+        category: account.name,
+        section,
+        qb_account_id: account.id,
+        prior_total: Math.round(priorMonthly.reduce((a, b) => a + b, 0)),
+        fy_total: fyMonthly.reduce((a, b) => a + b, 0),
+        target_or_factor: target,
+      },
     });
   }
+
+  const insertedLines = await budgetQueries.rebuildForFiscalYear(fiscalYear, lineSpecs);
+  // Pair returned line ids with the precomputed report metadata.
+  const createdLines = insertedLines.map((line, idx) => ({
+    id: line.id,
+    ...lineSpecs[idx]._reportMeta,
+  }));
 
   ok(res, {
     fiscal_year:       fiscalYear,
@@ -1038,7 +1036,10 @@ app.post('/api/quickbooks/sync', requireOwner, wrap(async (req, res) => {
   const lineByAccount = new Map();
   lines.forEach(l => { if (l.qb_account_id) lineByAccount.set(String(l.qb_account_id), l); });
 
-  let synced = 0;
+  // Collect all (line, period, amount) triples up-front, then write them in
+  // a single atomic batch. Previously each cell wrote on its own connection,
+  // so a network blip mid-loop left the budget with mixed-source actuals.
+  const cellSpecs = [];
   const mapped = [];
   const unmappedMap = new Map(); // accountId → {id, name}
   for (const row of parsed.accountRows) {
@@ -1049,15 +1050,15 @@ app.post('/api/quickbooks/sync', requireOwner, wrap(async (req, res) => {
     }
     mapped.push({ account_id: row.accountId, line_id: line.id });
     for (const [period, amount] of Object.entries(row.amounts)) {
-      await budgetQueries.setActual({
+      cellSpecs.push({
         line_id:       line.id,
         period_date:   period,
         actual_amount: amount,
         source:        'qb',
       });
-      synced++;
     }
   }
+  const synced = await budgetQueries.setActuals(cellSpecs);
 
   await qbConnectionQueries.markSynced(conn.id);
   ok(res, {

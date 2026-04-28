@@ -1485,6 +1485,45 @@ if (USE_PG) {
     deleteAllForFiscalYear: async (fiscalYear) => {
       await pool.query('DELETE FROM budget_lines WHERE fiscal_year=$1', [fiscalYear]);
     },
+    // Atomic wipe + rebuild for one fiscal year. Either the whole new layout
+    // lands or nothing changes — a Vercel function timeout or pool drop mid-
+    // way through can no longer leave a half-built budget.
+    //
+    // lineSpecs shape:
+    //   [{ section, category, sort_order, qb_account_id, notes,
+    //      cells: [{ period_date, budget_amount }] }]
+    rebuildForFiscalYear: async (fiscalYear, lineSpecs) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM budget_lines WHERE fiscal_year=$1', [fiscalYear]);
+        const created = [];
+        for (const spec of lineSpecs) {
+          const { rows: [line] } = await client.query(
+            `INSERT INTO budget_lines
+               (fiscal_year, section, category, sort_order, qb_account_id, notes)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [fiscalYear, spec.section, spec.category, spec.sort_order, spec.qb_account_id || null, spec.notes || null]
+          );
+          for (const cell of (spec.cells || [])) {
+            if (cell.budget_amount == null) continue;
+            await client.query(
+              `INSERT INTO budget_cells (line_id, period_date, budget_amount)
+               VALUES ($1, $2, $3)`,
+              [line.id, cell.period_date, cell.budget_amount]
+            );
+          }
+          created.push(line);
+        }
+        await client.query('COMMIT');
+        return created;
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
     upsertCell: async ({ line_id, period_date, budget_amount }) => {
       const { rows } = await pool.query(
         `INSERT INTO budget_cells (line_id, period_date, budget_amount)
@@ -1509,6 +1548,34 @@ if (USE_PG) {
         [line_id, period_date, actual_amount, source || 'manual']
       );
       return rows[0];
+    },
+    // Batch setActual inside a transaction. The QB sync route calls this with
+    // every (account, month) cell at once so a network blip mid-sync no
+    // longer leaves the budget with mixed-source actuals.
+    setActuals: async (specs) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const s of specs) {
+          await client.query(
+            `INSERT INTO budget_cells (line_id, period_date, actual_amount, actual_source, actual_synced_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (line_id, period_date)
+             DO UPDATE SET actual_amount = EXCLUDED.actual_amount,
+                           actual_source = EXCLUDED.actual_source,
+                           actual_synced_at = NOW(),
+                           updated_at = NOW()`,
+            [s.line_id, s.period_date, s.actual_amount, s.source || 'manual']
+          );
+        }
+        await client.query('COMMIT');
+        return specs.length;
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
     },
   };
 
@@ -2398,6 +2465,55 @@ if (USE_PG) {
       db.budget_cells = db.budget_cells.filter(c => !killedIds.has(c.line_id));
       persist(db);
     },
+    // Atomic in JSON mode by virtue of being single-process; persist once
+    // at the end so an exception mid-loop leaves data.json untouched.
+    rebuildForFiscalYear: async (fiscalYear, lineSpecs) => {
+      const snapshotLines = JSON.parse(JSON.stringify(db.budget_lines));
+      const snapshotCells = JSON.parse(JSON.stringify(db.budget_cells));
+      try {
+        const killedIds = new Set(
+          db.budget_lines.filter(l => l.fiscal_year === fiscalYear).map(l => l.id)
+        );
+        db.budget_lines = db.budget_lines.filter(l => l.fiscal_year !== fiscalYear);
+        db.budget_cells = db.budget_cells.filter(c => !killedIds.has(c.line_id));
+        const created = [];
+        for (const spec of lineSpecs) {
+          const line = {
+            id: nextId('budget_lines'),
+            fiscal_year: fiscalYear,
+            section: spec.section || 'opex',
+            category: spec.category,
+            sort_order: spec.sort_order ?? 0,
+            qb_account_id: spec.qb_account_id || null,
+            notes: spec.notes || null,
+            created_at: nowStr(),
+            updated_at: nowStr(),
+          };
+          db.budget_lines.push(line);
+          for (const cell of (spec.cells || [])) {
+            if (cell.budget_amount == null) continue;
+            db.budget_cells.push({
+              id: nextId('budget_cells'),
+              line_id: line.id,
+              period_date: cell.period_date,
+              budget_amount: Number(cell.budget_amount),
+              actual_amount: null,
+              actual_source: null,
+              actual_synced_at: null,
+              created_at: nowStr(),
+              updated_at: nowStr(),
+            });
+          }
+          created.push(line);
+        }
+        persist(db);
+        return created;
+      } catch (e) {
+        db.budget_lines = snapshotLines;
+        db.budget_cells = snapshotCells;
+        throw e;
+      }
+    },
     upsertCell: async ({ line_id, period_date, budget_amount }) => {
       const existing = db.budget_cells.find(c => c.line_id === +line_id && c.period_date === period_date);
       if (existing) {
@@ -2439,6 +2555,40 @@ if (USE_PG) {
         updated_at: nowStr(),
       };
       db.budget_cells.push(cell); persist(db); return cell;
+    },
+    // Atomic batch upsert mirroring the Postgres setActuals. Snapshots cells
+    // up-front and rolls back on exception so a partial write can't leave
+    // mixed-source actuals in data.json.
+    setActuals: async (specs) => {
+      const snapshot = JSON.parse(JSON.stringify(db.budget_cells));
+      try {
+        for (const s of specs) {
+          const existing = db.budget_cells.find(c => c.line_id === +s.line_id && c.period_date === s.period_date);
+          if (existing) {
+            existing.actual_amount = Number(s.actual_amount);
+            existing.actual_source = s.source || 'manual';
+            existing.actual_synced_at = nowStr();
+            existing.updated_at = nowStr();
+          } else {
+            db.budget_cells.push({
+              id: nextId('budget_cells'),
+              line_id: +s.line_id,
+              period_date: s.period_date,
+              budget_amount: 0,
+              actual_amount: Number(s.actual_amount),
+              actual_source: s.source || 'manual',
+              actual_synced_at: nowStr(),
+              created_at: nowStr(),
+              updated_at: nowStr(),
+            });
+          }
+        }
+        persist(db);
+        return specs.length;
+      } catch (e) {
+        db.budget_cells = snapshot;
+        throw e;
+      }
     },
   };
 
