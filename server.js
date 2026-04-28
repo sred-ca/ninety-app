@@ -341,7 +341,10 @@ function requireCoachingFlag(req, res, next) {
 }
 function requireAdminKey(req, res, next) {
   if (!NINETY_ADMIN_KEY) return fail(res, 'Coaching admin key not configured', 500);
-  const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  // Accept auth from: Authorization: Bearer <key> (pre-call builder, scripts)
+  // or: x-vapi-secret header (VAPI webhook callbacks)
+  const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim()
+    || (req.headers['x-vapi-secret'] || '').trim();
   const a = Buffer.from(token);
   const b = Buffer.from(NINETY_ADMIN_KEY);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
