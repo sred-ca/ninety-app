@@ -368,13 +368,21 @@ async function resolveCoachingTarget(req, res) {
 
 app.post('/api/coaching/calls', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
   const userId = await resolveCoachingTarget(req, res); if (userId == null) return;
-  const { summary, gratitude, transcript, commitments, call_date } = req.body || {};
+  const { summary, gratitude, transcript, commitments, call_date, external_id } = req.body || {};
   if (!Array.isArray(commitments)) return fail(res, 'commitments must be an array');
   if (call_date && !/^\d{4}-\d{2}-\d{2}$/.test(call_date)) {
     return fail(res, 'call_date must be YYYY-MM-DD');
   }
+  // Optional idempotency key — when present, a retry of the same webhook
+  // resolves to the existing call instead of creating a duplicate. Stella's
+  // backend can pass e.g. its VAPI call session id here. If absent, behavior
+  // is unchanged from the pre-idempotency days.
+  if (external_id != null && (typeof external_id !== 'string' || !external_id.trim())) {
+    return fail(res, 'external_id must be a non-empty string');
+  }
   ok(res, await coachingQueries.createCall({
     user_id: userId, summary, gratitude, transcript, commitments, call_date,
+    external_id: external_id ? external_id.trim() : undefined,
   }));
 }));
 

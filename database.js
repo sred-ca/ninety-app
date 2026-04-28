@@ -295,6 +295,9 @@ if (USE_PG) {
       ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_milestone_id INTEGER REFERENCES rock_milestones(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS idx_issues_source_milestone ON issues(source_milestone_id);
       ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';
+      ALTER TABLE coaching_calls ADD COLUMN IF NOT EXISTS external_id TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_coaching_calls_external_id
+        ON coaching_calls(external_id) WHERE external_id IS NOT NULL;
     `);
     // Owner seat assignment. Jude + Logan are the 50/50 owners; the budget and
     // any other owner-only views are gated by this flag. Emails are the stable
@@ -1000,16 +1003,34 @@ if (USE_PG) {
     // to CURRENT_DATE in the server's timezone (UTC on Vercel), which can bleed
     // into the caller's tomorrow for late-evening calls — so clients should pass
     // the caller-local journal date explicitly.
-    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date }) => {
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date, external_id }) => {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const call = await client.query(
-          `INSERT INTO coaching_calls (user_id, summary, gratitude, transcript, call_date)
-           VALUES ($1,$2,$3,$4, COALESCE($5::date, CURRENT_DATE)) RETURNING id, call_date, created_at`,
-          [user_id, summary || null, gratitude || null, transcript || null, call_date || null]
+        // Idempotency: when the caller passes an external_id (e.g. VAPI's
+        // call session id), a retry of the same webhook resolves to the
+        // existing call instead of creating a duplicate. Backed by a partial
+        // unique index on coaching_calls(external_id) WHERE external_id
+        // IS NOT NULL — without an external_id, behavior is unchanged.
+        const ins = await client.query(
+          `INSERT INTO coaching_calls (user_id, summary, gratitude, transcript, call_date, external_id)
+           VALUES ($1,$2,$3,$4, COALESCE($5::date, CURRENT_DATE), $6)
+           ON CONFLICT (external_id) WHERE external_id IS NOT NULL DO NOTHING
+           RETURNING id, call_date, created_at`,
+          [user_id, summary || null, gratitude || null, transcript || null, call_date || null, external_id || null]
         );
-        const callId = call.rows[0].id;
+        if (!ins.rows[0]) {
+          // Conflict on external_id — earlier request already wrote this call.
+          // Look up the existing row and return its id without re-creating
+          // commitments (they're already in place from the first run).
+          const existing = await client.query(
+            'SELECT id FROM coaching_calls WHERE external_id=$1',
+            [external_id]
+          );
+          await client.query('COMMIT');
+          return { call_id: existing.rows[0].id, issue_ids: [], duplicate: true };
+        }
+        const callId = ins.rows[0].id;
         // Default due: tomorrow 23:59 in server TZ
         const due = new Date(); due.setDate(due.getDate() + 1);
         const dueStr = due.toISOString().slice(0, 10);
@@ -2063,11 +2084,18 @@ if (USE_PG) {
   persist(db);
 
   const coachingQueries = {
-    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date }) => {
+    createCall: async ({ user_id, summary, gratitude, transcript, commitments, call_date, external_id }) => {
       const uid = +user_id;
+      // Idempotency: a retry with the same external_id resolves to the
+      // existing call rather than duplicating commitments + issues.
+      if (external_id) {
+        const dup = db.coaching_calls.find(c => c.external_id === external_id);
+        if (dup) return { call_id: dup.id, issue_ids: [], duplicate: true };
+      }
       const callDate = call_date || new Date().toISOString().slice(0,10);
       const call = { id: nextId('coaching_calls'), user_id: uid, call_date: callDate,
         summary: summary || null, gratitude: gratitude || null, transcript: transcript || null,
+        external_id: external_id || null,
         created_at: nowStr() };
       db.coaching_calls.push(call);
 
