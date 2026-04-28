@@ -479,12 +479,27 @@ app.put('/api/coaching/assistant-prompt', requireCoachingFlag, requireAdminKey, 
 // return an assistant override so Stella greets and remembers the right
 // person. Unknown callers get a short "contact your admin" handoff and the
 // call is ended server-side by VAPI.
-app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireAdminKey, wrap(async (req, res) => {
+//
+// Auth: accepts admin key via Authorization header, x-vapi-secret header,
+// OR a ?token= query param (phone-number-level webhooks don't support secrets).
+function requireWebhookAuth(req, res, next) {
+  if (!NINETY_ADMIN_KEY) return fail(res, 'Coaching admin key not configured', 500);
+  const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim()
+    || (req.headers['x-vapi-secret'] || '').trim()
+    || (req.query.token || '').trim();
+  const a = Buffer.from(token);
+  const b = Buffer.from(NINETY_ADMIN_KEY);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
+  next();
+}
+app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireWebhookAuth, wrap(async (req, res) => {
   // VAPI webhook payload shape:
   //   { message: { type: 'assistant-request', call: { customer: { number: '+1...' } } } }
   const msg    = req.body?.message || req.body || {};
   const call   = msg.call || {};
   const phone  = call.customer?.number || call.from || null;
+
+  const STELLA_ASSISTANT_ID = process.env.STELLA_ASSISTANT_ID;
 
   const handoff = {
     assistant: {
@@ -500,15 +515,14 @@ app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireAdm
   const p = await coachingQueries.getAssistantPrompt(u.id);
   if (!p) return res.json(handoff);  // no prompt built yet
 
-  // VAPI accepts `assistantOverrides` to layer on top of a base assistant.
-  // We only override the system message; voice, tools, and other config are
-  // left to the base Stella assistant.
+  // Return the base Stella assistant ID + override just the system prompt.
+  // Voice, transcriber, and other config stay on the base assistant in VAPI.
   res.json({
+    assistantId: STELLA_ASSISTANT_ID,
     assistantOverrides: {
       model: {
         messages: [{ role: 'system', content: p.system_prompt }]
       },
-      // Keep metadata handy if VAPI logs it
       metadata: { coaching_user_id: u.id, coaching_user_name: u.name }
     }
   });
