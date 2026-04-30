@@ -353,7 +353,6 @@ body {
 .badge-done      { background: var(--blue-bg);   color: var(--blue); }
 .badge-not_started{ background: var(--surface3); color: var(--text2); }
 
-.badge-not_started { background: var(--surface3);  color: var(--text2); }
 .badge-in_progress { background: var(--blue-bg);   color: var(--blue); }
 .badge-waiting_for { background: var(--yellow-bg); color: var(--yellow); }
 .badge-blocker     { background: var(--red-bg);    color: var(--red); }
@@ -426,7 +425,6 @@ body {
   text-transform: uppercase; letter-spacing: 0.6px;
   color: var(--text2);
 }
-.kanban-column--not_started .kanban-column-head { color: var(--text2); }
 .kanban-column--in_progress .kanban-column-head { color: var(--accent); }
 .kanban-column--waiting_for .kanban-column-head { color: var(--yellow); }
 .kanban-column--blocker     .kanban-column-head { color: var(--red); }
@@ -1396,7 +1394,6 @@ textarea { resize: vertical; min-height: 72px; }
 .runner-todo-filter-dot.blocker     { background: var(--red); }
 .runner-todo-filter-dot.waiting_for { background: var(--yellow); }
 .runner-todo-filter-dot.in_progress { background: var(--blue); }
-.runner-todo-filter-dot.not_started { background: var(--text2); }
 .runner-todo-count {
   margin-left: auto;
   font-size: 12px;
@@ -3380,7 +3377,6 @@ textarea { resize: vertical; min-height: 72px; }
   font-size: 10px; padding: 1px 7px; border-radius: 999px;
   text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
 }
-.goal-todo-status--not_started { background: var(--surface3);  color: var(--text2); }
 .goal-todo-status--in_progress { background: var(--blue-bg);   color: var(--blue); }
 .goal-todo-status--waiting_for { background: var(--yellow-bg); color: var(--yellow); }
 .goal-todo-status--blocker     { background: var(--red-bg);    color: var(--red); }

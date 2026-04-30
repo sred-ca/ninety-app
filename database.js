@@ -308,10 +308,14 @@ if (USE_PG) {
       UPDATE users SET role='owner'
        WHERE email IN ('jude@sred.ca','logan@sred.ca') OR name='Logan';
     `);
-    // Rename legacy statuses to new names and fix column default
+    // Rename legacy statuses to new names and fix column default. The
+    // 'not_started' status was added briefly and then removed — collapse it
+    // back into 'in_progress' so existing rows aren't orphaned. Idempotent:
+    // a second run is a no-op once nothing matches.
     await pool.query(`
       UPDATE issues SET status='in_progress' WHERE status='identified';
       UPDATE issues SET status='blocker'     WHERE status='discussing';
+      UPDATE issues SET status='in_progress' WHERE status='not_started';
       ALTER TABLE issues ALTER COLUMN status SET DEFAULT 'in_progress';
     `);
     // Backfill milestone-promoted to-dos that earlier cron runs created with
@@ -1729,6 +1733,12 @@ if (USE_PG) {
   (db.users || []).forEach(u => {
     if (!u.role) u.role = 'member';
     if (OWNER_EMAILS.has(u.email) || OWNER_NAMES.has(u.name)) u.role = 'owner';
+  });
+  // Collapse the briefly-introduced 'not_started' to-do status back into
+  // 'in_progress' so existing rows aren't orphaned now that the enum no
+  // longer accepts it. Idempotent.
+  (db.issues || []).forEach(i => {
+    if (i.status === 'not_started') i.status = 'in_progress';
   });
   // Boot-time persist may throw if /tmp is briefly read-only on a serverless
   // cold start. Don't crash the whole module — the in-memory db.users will

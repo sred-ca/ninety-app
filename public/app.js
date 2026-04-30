@@ -44,7 +44,7 @@ const state = {
     interval: null,
     attendees: [],
     // To-dos panel: column filters + sort
-    todoFilters: { blocker: true, waiting_for: true, in_progress: true, not_started: true },
+    todoFilters: { blocker: true, waiting_for: true, in_progress: true },
     todoSort: { col: 'status', dir: 'asc' },
   },
   // Insights
@@ -126,7 +126,6 @@ function avatar(name, picture, color, size = 28) {
 }
 
 const ISSUE_STATUS_LABELS = {
-  not_started: 'Not Started',
   in_progress: 'In Progress',
   waiting_for: 'Waiting For',
   blocker:     'Blocked',
@@ -892,7 +891,6 @@ function updateIssueOwnerFilterLabel() {
    column → PUT /api/issues/:id { status }, then reload to reflect server
    truth (and any side effects, e.g. solving a card from a milestone). */
 const KANBAN_COLUMNS = [
-  { status: 'not_started', label: 'Not Started' },
   { status: 'in_progress', label: 'In Progress' },
   { status: 'waiting_for', label: 'Waiting For' },
   { status: 'blocker',     label: 'Blocked' },
@@ -1044,15 +1042,13 @@ function renderIssues() {
 
   // Stats: exclude archived from counts; Total = all open (non-solved)
   const activeIssues = inScope.filter(i => !i.archived);
-  const notStarted = activeIssues.filter(i => i.status === 'not_started').length;
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
   const waitingFor = activeIssues.filter(i => i.status === 'waiting_for').length;
   const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
   const solved     = activeIssues.filter(i => i.status === 'solved').length;
-  const total      = notStarted + inProgress + waitingFor + blockers;
+  const total      = inProgress + waitingFor + blockers;
   qs('#issues-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
-    <div class="stat-card"><span class="stat-label">Not Started</span><span class="stat-value">${notStarted}</span></div>
     <div class="stat-card accent"><span class="stat-label">In Progress</span><span class="stat-value">${inProgress}</span></div>
     <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waitingFor}</span></div>
     <div class="stat-card red"><span class="stat-label">Blocked</span><span class="stat-value">${blockers}</span></div>
@@ -1261,7 +1257,7 @@ function openIssueModal(editId) {
   qs('#issue-title').value = issue ? issue.title : '';
   qs('#issue-description').value = issue ? (issue.description || '') : '';
   qs('#issue-priority').value = issue ? issue.priority : 'medium';
-  qs('#issue-status').value = issue ? issue.status : 'not_started';
+  qs('#issue-status').value = issue ? issue.status : 'in_progress';
   qs('#issue-status-group').style.display = 'flex';
   qs('#issue-private').checked = issue ? !!issue.private : (state.issueVisibilityFilter === 'private');
 
@@ -2248,7 +2244,7 @@ function renderRunnerIssuesPanel(sec) {
 }
 
 /* Status priority for the runner to-dos default sort (lower = higher priority). */
-const RUNNER_TODO_STATUS_RANK = { blocker: 0, waiting_for: 1, in_progress: 2, not_started: 3 };
+const RUNNER_TODO_STATUS_RANK = { blocker: 0, waiting_for: 1, in_progress: 2 };
 
 function renderRunnerTodosPanel(sec) {
   const panel = qs('#runner-todos-panel');
@@ -2270,7 +2266,7 @@ function renderRunnerTodosPanel(sec) {
   const allOpen = (state.issues || []).filter(i =>
     attendeeIds.has(i.owner_id)
     && !i.archived
-    && (i.status === 'blocker' || i.status === 'waiting_for' || i.status === 'in_progress' || i.status === 'not_started')
+    && (i.status === 'blocker' || i.status === 'waiting_for' || i.status === 'in_progress')
   );
 
   // Apply status filter chips.
@@ -2341,7 +2337,7 @@ function renderRunnerTodosHeader(shown, total) {
   const { col, dir } = state.runner.todoSort;
   const arrow = (c) => col === c ? (dir === 'desc' ? ' ▼' : ' ▲') : '';
   const filters = state.runner.todoFilters;
-  const countsByStatus = { blocker: 0, waiting_for: 0, in_progress: 0, not_started: 0 };
+  const countsByStatus = { blocker: 0, waiting_for: 0, in_progress: 0 };
   const attendeeIds = new Set((state.runner.attendees || []).map(a => a.id));
   (state.issues || []).forEach(i => {
     if (attendeeIds.has(i.owner_id) && !i.archived && countsByStatus[i.status] !== undefined) {
@@ -2359,9 +2355,6 @@ function renderRunnerTodosHeader(shown, total) {
       </button>
       <button type="button" class="runner-todo-filter-chip ${filters.in_progress ? 'active' : ''}" data-status="in_progress">
         <span class="runner-todo-filter-dot in_progress"></span> In Progress (${countsByStatus.in_progress})
-      </button>
-      <button type="button" class="runner-todo-filter-chip ${filters.not_started ? 'active' : ''}" data-status="not_started">
-        <span class="runner-todo-filter-dot not_started"></span> Not Started (${countsByStatus.not_started})
       </button>
       <span class="runner-todo-count">${shown} of ${total}</span>
     </div>
@@ -2942,7 +2935,6 @@ function renderInsightsRocks() {
 function renderInsightsTodos() {
   const filtered = filterByOwnerAndPeriod(state.insightsTodos, 'created_at');
   const total    = filtered.length;
-  const notStart = filtered.filter(i => i.status === 'not_started').length;
   const inProg   = filtered.filter(i => i.status === 'in_progress').length;
   const waiting  = filtered.filter(i => i.status === 'waiting_for').length;
   const blocker  = filtered.filter(i => i.status === 'blocker').length;
@@ -2953,7 +2945,6 @@ function renderInsightsTodos() {
 
   qs('#insights-todos-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total</span><span class="stat-value">${total}</span></div>
-    <div class="stat-card"><span class="stat-label">Not Started</span><span class="stat-value">${notStart}</span></div>
     <div class="stat-card blue"><span class="stat-label">In Progress</span><span class="stat-value">${inProg}</span></div>
     <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waiting}</span></div>
     <div class="stat-card red"><span class="stat-label">Blocked</span><span class="stat-value">${blocker}</span></div>
@@ -2964,8 +2955,8 @@ function renderInsightsTodos() {
   destroyChart('todos-status');
   state.insightCharts['todos-status'] = new Chart(qs('#chart-todos-status').getContext('2d'), {
     type: 'doughnut',
-    data: { labels: ['Not Started', 'In Progress', 'Waiting For', 'Blocked', 'Complete'],
-      datasets: [{ data: [notStart, inProg, waiting, blocker, solved], backgroundColor: ['#9ca3af', '#3b82f6', '#f59e0b', '#ef4444', '#10b981'],
+    data: { labels: ['In Progress', 'Waiting For', 'Blocked', 'Complete'],
+      datasets: [{ data: [inProg, waiting, blocker, solved], backgroundColor: ['#3b82f6', '#f59e0b', '#ef4444', '#10b981'],
         borderColor: '#1a1a24', borderWidth: 3, hoverOffset: 6 }] },
     options: { responsive: true, maintainAspectRatio: false, cutout: '65%',
       plugins: { legend: { position: 'bottom' },
