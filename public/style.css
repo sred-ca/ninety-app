@@ -398,11 +398,12 @@ body {
 }
 
 /* ── Kanban board ─────────────────────────────────────────────────── */
+/* Fixed-width columns + horizontal scroll (HubSpot/Trello style). Columns
+   stay readable on every viewport; if they don't all fit, the user scrolls. */
 .kanban-board {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  display: flex;
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
   overflow-x: auto;
   padding-bottom: 4px;
 }
@@ -411,7 +412,8 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: flex; flex-direction: column;
-  min-height: 240px;
+  flex: 0 0 320px;
+  min-height: 320px;
   max-height: calc(100vh - 240px);
   overflow: hidden;
 }
@@ -478,13 +480,6 @@ body {
 }
 .kanban-card--private { border-left: 3px solid var(--text2); }
 
-@media (max-width: 1280px) {
-  .kanban-board {
-    grid-auto-flow: column;
-    grid-auto-columns: 240px;
-    grid-template-columns: none;
-  }
-}
 
 .issue-card {
   background: var(--surface);
