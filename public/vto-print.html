@@ -358,8 +358,9 @@
           <span class="k">Profit</span><span class="v">${esc(vto.one_year_profit || '—')}</span>
         </div>
       `;
-      const oneGoals = (vto.one_year_goals && vto.one_year_goals.length)
-        ? `<ol class="goal-list">${vto.one_year_goals.map(g => {
+      const printableGoals = (vto.one_year_goals || []).filter(g => !g.archived);
+      const oneGoals = printableGoals.length
+        ? `<ol class="goal-list">${printableGoals.map(g => {
             const owner = g.owner_id && userById[g.owner_id] ? `<span class="owner-tag">${esc(userById[g.owner_id].name)}</span>` : '';
             return `<li>${esc(g.text || '')}${owner}</li>`;
           }).join('')}</ol>`

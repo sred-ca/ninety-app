@@ -459,11 +459,14 @@ function openRockModal(editId) {
   const qSel = qs('#rock-quarter');
   qSel.innerHTML = allQ.map(q => `<option value="${q}" ${rock ? (rock.quarter === q ? 'selected' : '') : (q === (state.quarterFilter || currentQuarter()) ? 'selected' : '')}>${q}</option>`).join('');
 
-  // Populate goal dropdown from V/TO annual goals.
+  // Populate goal dropdown from V/TO annual goals (skip archived, but still
+  // show the linked archived goal for an existing rock so the link is visible).
   const goalSel = qs('#rock-goal');
   const allGoals = (state.vto?.one_year_goals) || [];
+  const visibleGoals = allGoals.filter(g => !g.archived
+    || (rock && rock.goal_id === g.id));
   goalSel.innerHTML = '<option value="">— No goal —</option>' +
-    allGoals.map((g, i) => `<option value="${esc(g.id || '')}" ${rock && rock.goal_id === g.id ? 'selected' : ''}>${i + 1}. ${esc((g.text || '').slice(0, 80))}</option>`).join('');
+    visibleGoals.map((g, i) => `<option value="${esc(g.id || '')}" ${rock && rock.goal_id === g.id ? 'selected' : ''}>${i + 1}. ${esc((g.text || '').slice(0, 80))}${g.archived ? ' (archived)' : ''}</option>`).join('');
 
   // Milestones section — only shown when editing an existing rock.
   state.currentMilestones = [];
@@ -866,18 +869,130 @@ function updateIssueOwnerFilterLabel() {
   labelEl.textContent = `${ids.length} owners`;
 }
 
+/* ── Kanban view ─────────────────────────────────────────────────────
+   Drag-and-drop swimlanes for the four To-Do statuses. Drop a card on a
+   column → PUT /api/issues/:id { status }, then reload to reflect server
+   truth (and any side effects, e.g. solving a card from a milestone). */
+const KANBAN_COLUMNS = [
+  { status: 'in_progress', label: 'In Progress' },
+  { status: 'waiting_for', label: 'Waiting For' },
+  { status: 'blocker',     label: 'Blocker' },
+  { status: 'solved',      label: 'Solved' },
+];
+
+function renderIssuesKanban(root, issues) {
+  const sortFn = state.issueSortByDue
+    ? (a, b) => (a.due_date || '9999-12-31').localeCompare(b.due_date || '9999-12-31')
+    : (a, b) => (a.id || 0) - (b.id || 0);
+
+  root.innerHTML = '';
+  KANBAN_COLUMNS.forEach(col => {
+    const cards = issues.filter(i => i.status === col.status).sort(sortFn);
+    const colEl = document.createElement('div');
+    colEl.className = `kanban-column kanban-column--${col.status}`;
+    colEl.dataset.status = col.status;
+    colEl.innerHTML = `
+      <div class="kanban-column-head">
+        <span class="kanban-column-title">${col.label}</span>
+        <span class="kanban-column-count">${cards.length}</span>
+      </div>
+      <div class="kanban-column-body" data-drop-status="${col.status}"></div>
+    `;
+    const body = colEl.querySelector('.kanban-column-body');
+    cards.forEach(issue => body.appendChild(buildIssueKanbanCard(issue)));
+    root.appendChild(colEl);
+  });
+
+  // Drop targets
+  root.querySelectorAll('.kanban-column-body').forEach(body => {
+    body.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      body.classList.add('drop-hover');
+    });
+    body.addEventListener('dragleave', () => body.classList.remove('drop-hover'));
+    body.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      body.classList.remove('drop-hover');
+      const id = e.dataTransfer.getData('text/issue-id');
+      const newStatus = body.dataset.dropStatus;
+      if (!id || !newStatus) return;
+      const issue = state.issues.find(i => String(i.id) === String(id));
+      if (!issue || issue.status === newStatus) return;
+      try { await api.put(`/api/issues/${id}`, { status: newStatus }); }
+      catch (err) { alert(err.message); }
+      loadIssues();
+    });
+  });
+}
+
+function buildIssueKanbanCard(issue) {
+  const card = document.createElement('div');
+  card.className = 'kanban-card' + (issue.private ? ' kanban-card--private' : '');
+  card.draggable = true;
+  card.dataset.issueId = issue.id;
+
+  card.addEventListener('dragstart', (e) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/issue-id', String(issue.id));
+    card.classList.add('dragging');
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('click', () => openIssueModal(issue.id));
+
+  const due = formatDueDate(issue.due_date);
+  const dueChip = due
+    ? `<span class="due-date-chip due-${due.urgency}">${due.text}</span>`
+    : '';
+  const ownerChip = issue.owner_name
+    ? `<span class="kanban-card-owner"></span>`
+    : '';
+  const rockChip = renderIssueRockChip(issue);
+  const privateMark = issue.private
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;flex-shrink:0;margin-right:4px;vertical-align:-1px;opacity:.7"><rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`
+    : '';
+
+  card.innerHTML = `
+    <div class="kanban-card-top">
+      <span class="issue-priority-dot ${issue.priority}"></span>
+      <span class="kanban-card-title">${privateMark}${esc(issue.title)}</span>
+    </div>
+    <div class="kanban-card-meta">
+      ${dueChip}
+      ${rockChip}
+      ${ownerChip}
+    </div>
+  `;
+
+  if (issue.owner_name) {
+    const ow = card.querySelector('.kanban-card-owner');
+    if (ow) {
+      ow.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);margin-left:auto';
+      ow.appendChild(avatar(issue.owner_name, issue.owner_picture, issue.owner_color, 16));
+      ow.append(document.createTextNode(issue.owner_name.split(' ')[0] || ''));
+    }
+  }
+  return card;
+}
+
 function renderIssues() {
   const grid = qs('#issues-list');
   const tableEl = qs('#issues-table');
   const tableBody = qs('#issues-table-body');
+  const kanbanEl = qs('#issues-kanban');
   const empty = qs('#issues-empty');
-  const listMode = state.issueViewMode === 'list';
-  const container = listMode ? tableBody : grid;
-  const buildFn   = listMode ? buildIssueRow : buildIssueCard;
+  const kanbanMode = state.issueViewMode === 'kanban';
+  const listMode   = state.issueViewMode === 'list';
+  const container  = listMode ? tableBody : grid;
+  const buildFn    = listMode ? buildIssueRow : buildIssueCard;
   grid.innerHTML = '';
   tableBody.innerHTML = '';
-  grid.hidden = listMode;
+  grid.hidden    = listMode || kanbanMode;
   tableEl.hidden = !listMode;
+  kanbanEl.hidden = !kanbanMode;
+  // Status filter tabs are pointless when kanban already shows every column.
+  const statusTabs = qs('#issue-filter-tabs');
+  if (statusTabs) statusTabs.style.display = kanbanMode ? 'none' : '';
 
   // Scope everything (list + stats) to the current visibility tab
   const inScope = state.issues.filter(i =>
@@ -922,6 +1037,16 @@ function renderIssues() {
     <div class="stat-card red"><span class="stat-label">Blockers</span><span class="stat-value">${blockers}</span></div>
     <div class="stat-card green"><span class="stat-label">Solved</span><span class="stat-value">${solved}</span></div>
   `;
+
+  // Kanban mode renders its own columns from the owner-scoped, non-archived
+  // set (ignores the status tab filter — every column is always visible).
+  if (kanbanMode) {
+    const kanbanIssues = ownerScoped.filter(i => !i.archived);
+    if (kanbanIssues.length === 0) { empty.classList.remove('hidden'); }
+    else { empty.classList.add('hidden'); }
+    renderIssuesKanban(kanbanEl, kanbanIssues);
+    return;
+  }
 
   if (filtered.length === 0) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
@@ -1049,11 +1174,11 @@ document.addEventListener('click', (e) => {
   if (!root.contains(e.target)) qs('#issue-owner-filter-panel').hidden = true;
 });
 
-/* Issue view-mode toggle (cards / list) — persisted to localStorage */
+/* Issue view-mode toggle (cards / list / kanban) — persisted to localStorage */
 const ISSUE_VIEW_MODE_KEY = 'ninety.issueViewMode';
 {
   const saved = localStorage.getItem(ISSUE_VIEW_MODE_KEY);
-  if (saved === 'cards' || saved === 'list') {
+  if (saved === 'cards' || saved === 'list' || saved === 'kanban') {
     state.issueViewMode = saved;
     qsa('#issue-view-toggle .view-mode-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.mode === saved);
@@ -1133,7 +1258,13 @@ function openIssueModal(editId) {
   // to-do to any rock — current, future, or past. Sorted current-quarter
   // first, then by quarter desc, so the most relevant options come up top.
   const rockSel = qs('#issue-rock');
-  const goalIndexById = new Map((state.vto?.one_year_goals || []).map((g, i) => [g.id, i + 1]));
+  // Number goals by their visible position (skip archived) so [Goal N] labels
+  // line up with what the user sees in the Goals tab.
+  const goalIndexById = new Map(
+    (state.vto?.one_year_goals || [])
+      .filter(g => !g.archived)
+      .map((g, i) => [g.id, i + 1])
+  );
   const cq = currentQuarter();
   const rocksForPicker = [...(state.allRocks || [])].sort((a, b) => {
     if (a.quarter === cq && b.quarter !== cq) return -1;
@@ -1195,6 +1326,7 @@ qs('#confirm-delete-btn').addEventListener('click', async () => {
     else if (type === 'team-issue') { await api.del(`/api/team-issues/${id}`); closeModal('confirm-modal'); loadTeamIssues(); }
     else if (type === 'agenda')  { await api.del(`/api/agendas/${id}`);  closeModal('confirm-modal'); loadAgendas(); }
     else if (type === 'meeting') { await api.del(`/api/meetings/${id}`); closeModal('confirm-modal'); loadMeetings(); }
+    else if (type === 'goal')    { await deleteGoal(id);              closeModal('confirm-modal'); loadGoals(); }
   } catch (e) { alert(e.message); }
   state.pendingDelete = null;
 });
@@ -2401,7 +2533,7 @@ function renderMy90() {
       : (g.owner_id ? [+g.owner_id] : []);
     return ids.map(id => state.users.find(u => u.id === +id)).filter(Boolean);
   };
-  const goals = (vto && vto.one_year_goals) || [];
+  const goals = ((vto && vto.one_year_goals) || []).filter(g => !g.archived);
   if (goals.length) {
     const fyLabel = vto.one_year_future_date
       ? `to ${new Date(vto.one_year_future_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`
@@ -3646,7 +3778,7 @@ function renderVtoOneYear() {
       vtoInputField('Revenue', 'one_year_revenue_input', state.vto.one_year_revenue, 'e.g. $1.5M'),
       vtoInputField('Profit',  'one_year_profit_input',  state.vto.one_year_profit,  'e.g. $300K'),
       vtoMeasurablesEditor('one_year_measurables', state.vto.one_year_measurables || []),
-      vtoGoalsEditor(state.vto.one_year_goals || []),
+      vtoGoalsEditor((state.vto.one_year_goals || []).filter(g => !g.archived)),
       vtoFormActions('one_year', () => ({
         one_year_future_date:  qs('#one_year_future_date_input').value || null,
         one_year_revenue:      qs('#one_year_revenue_input').value,
@@ -3672,7 +3804,7 @@ function renderVtoOneYear() {
     measurables.forEach(m => mWrap.appendChild(labelValueRow(m.label, m.value)));
     body.appendChild(mWrap);
   }
-  const goals = state.vto.one_year_goals || [];
+  const goals = (state.vto.one_year_goals || []).filter(g => !g.archived);
   if (goals.length) {
     const gWrap = document.createElement('div'); gWrap.className = 'vto-subsection';
     const h = document.createElement('h4'); h.textContent = 'Goals for the Year'; gWrap.appendChild(h);
@@ -3854,8 +3986,8 @@ function vtoGoalsEditor(goals) {
     return [];
   };
   const draft = goals.length
-    ? goals.map(g => ({ text: g.text || '', owner_ids: initOwnerIds(g) }))
-    : [{ text: '', owner_ids: [] }];
+    ? goals.map(g => ({ id: g.id || null, text: g.text || '', owner_ids: initOwnerIds(g) }))
+    : [{ id: null, text: '', owner_ids: [] }];
 
   const repaint = () => {
     listWrap.innerHTML = '';
@@ -3903,7 +4035,7 @@ function vtoGoalsEditor(goals) {
   const add = document.createElement('button');
   add.type = 'button'; add.className = 'btn btn-ghost btn-sm';
   add.textContent = '+ Add goal';
-  add.onclick = () => { draft.push({ text: '', owner_ids: [] }); repaint(); };
+  add.onclick = () => { draft.push({ id: null, text: '', owner_ids: [] }); repaint(); };
 
   wrap.append(listWrap, add);
   return wrap;
@@ -3911,16 +4043,22 @@ function vtoGoalsEditor(goals) {
 function vtoCollectGoals() {
   const listWrap = qs('.vto-dyn-list[data-field="one_year_goals"]');
   if (!listWrap || !listWrap._draft) return [];
-  return listWrap._draft
+  // Editor only shows non-archived goals — merge archived ones from state so
+  // saving the V/TO doesn't delete them.
+  const archived = (state.vto?.one_year_goals || []).filter(g => g.archived);
+  const edited = listWrap._draft
     .map(g => {
       const ids = (g.owner_ids || []).map(x => +x).filter(Boolean);
-      return {
+      const out = {
         text: (g.text || '').trim(),
         owner_ids: ids,
         owner_id: ids[0] || null,  // backward compat with consumers reading owner_id
       };
+      if (g.id) out.id = g.id;  // preserve existing id so linked rocks stay attached
+      return out;
     })
     .filter(g => g.text);
+  return [...edited, ...archived];
 }
 
 function vtoFormActions(section, buildPatch) {
@@ -4643,7 +4781,12 @@ async function openBudgetAddLineModal() {
    GOALS TAB  (Goal → Rock → To-Do drill-down)
    ════════════════════════════════════════════════════════════════════ */
 
-const goalsState = { expandedGoals: new Set(), expandedRocks: new Set() };
+const goalsState = { expandedGoals: new Set(), expandedRocks: new Set(), showArchived: false };
+
+function canEditGoals() {
+  return state.currentUser?.role === 'owner'
+    || (state.currentUser?.tabs || []).includes('vto');
+}
 
 async function loadGoals() {
   // Fetch fresh data — V/TO for goals, all rocks (every quarter), all issues.
@@ -4660,19 +4803,42 @@ async function loadGoals() {
 
 function renderGoals() {
   const root = qs('#goals-tree');
-  const goals = (state.vto?.one_year_goals) || [];
+  const allGoals = (state.vto?.one_year_goals) || [];
+  const active   = allGoals.filter(g => !g.archived);
+  const archived = allGoals.filter(g => g.archived);
   const sub   = qs('#goals-subtitle');
   if (state.vto?.one_year_future_date) {
     const fy = new Date(state.vto.one_year_future_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
     sub.textContent = `Annual goals to ${fy} — drill into rocks and to-dos`;
   }
+  qs('#add-goal-btn').hidden = !canEditGoals();
 
-  if (!goals.length) {
-    root.innerHTML = `<div class="empty-state"><p>No annual goals yet. Add them in the V/TO tab.</p></div>`;
+  if (!active.length && !archived.length) {
+    root.innerHTML = canEditGoals()
+      ? `<div class="empty-state"><p>No annual goals yet. Click <strong>Add Goal</strong> to create your first one.</p></div>`
+      : `<div class="empty-state"><p>No annual goals yet.</p></div>`;
     return;
   }
 
-  root.innerHTML = goals.map((g, i) => renderGoalCard(g, i)).join('');
+  let html = active.length
+    ? active.map((g, i) => renderGoalCard(g, i)).join('')
+    : `<div class="empty-state"><p>No active annual goals. ${canEditGoals() ? 'Click Add Goal to create one, or expand archived below.' : ''}</p></div>`;
+
+  if (archived.length) {
+    html += `
+      <div class="goals-archived-block">
+        <button type="button" class="goals-archived-toggle" id="goals-archived-toggle">
+          <span>${goalsState.showArchived ? '▾' : '▸'}</span>
+          <span>Archived goals</span>
+          <span class="goals-archived-count">${archived.length}</span>
+        </button>
+        ${goalsState.showArchived
+          ? `<div class="goals-archived-list">${archived.map((g, i) => renderGoalCard(g, i, { archived: true })).join('')}</div>`
+          : ''}
+      </div>
+    `;
+  }
+  root.innerHTML = html;
 
   // Wire interactions
   root.querySelectorAll('[data-toggle-goal]').forEach(el => {
@@ -4704,9 +4870,32 @@ function renderGoals() {
       openIssueModal(+el.dataset.issueEdit);
     });
   });
+  root.querySelectorAll('[data-goal-edit]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGoalModal(el.dataset.goalEdit);
+    });
+  });
+  root.querySelectorAll('[data-goal-archive]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleGoalArchive(el.dataset.goalArchive);
+    });
+  });
+  root.querySelectorAll('[data-goal-delete]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmDeleteGoal(el.dataset.goalDelete);
+    });
+  });
+  const archToggle = qs('#goals-archived-toggle');
+  if (archToggle) archToggle.addEventListener('click', () => {
+    goalsState.showArchived = !goalsState.showArchived;
+    renderGoals();
+  });
 }
 
-function renderGoalCard(goal, idx) {
+function renderGoalCard(goal, idx, opts = {}) {
   const goalRocks = (state.rocks || []).filter(r => r.goal_id === goal.id);
   const totalRocks = goalRocks.length;
   const doneRocks  = goalRocks.filter(r => r.status === 'done').length;
@@ -4734,8 +4923,26 @@ function renderGoalCard(goal, idx) {
         : goalRocks.map(r => renderRockRow(r)).join(''))
     : '';
 
+  const isArchived = !!opts.archived;
+  const canEdit    = canEditGoals();
+  const actionsHtml = canEdit ? `
+    <div class="goal-card-actions" onclick="event.stopPropagation()">
+      ${!isArchived ? `<button class="icon-btn" data-goal-edit="${esc(goal.id)}" title="Edit goal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+      </button>` : ''}
+      <button class="icon-btn" data-goal-archive="${esc(goal.id)}" title="${isArchived ? 'Unarchive' : 'Archive'} goal">
+        ${isArchived
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 9 12 2 21 9"/><path d="M5 9v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M9 14h6"/></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>'}
+      </button>
+      <button class="icon-btn danger" data-goal-delete="${esc(goal.id)}" title="Delete goal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </div>
+  ` : '';
+
   return `
-    <div class="goal-card">
+    <div class="goal-card${isArchived ? ' goal-card--archived' : ''}">
       <div class="goal-card-head" data-toggle-goal="${esc(goal.id)}">
         <div class="goal-card-num">${idx + 1}</div>
         <div class="goal-card-main">
@@ -4751,6 +4958,7 @@ function renderGoalCard(goal, idx) {
           <div class="goal-progress-bar"><div class="goal-progress-fill" style="width:${pct}%"></div></div>
           <div class="goal-progress-pct">${pct}%</div>
         </div>
+        ${actionsHtml}
         <div class="goal-card-toggle">${expanded ? '▾' : '▸'}</div>
       </div>
       ${expanded ? `<div class="goal-card-body">${rocksHtml}</div>` : ''}
@@ -4808,6 +5016,110 @@ function renderTodoRow(todo) {
     </div>
   `;
 }
+
+/* ── Goal CRUD ─────────────────────────────────────────────────────── */
+// Goals live inside the V/TO doc as the `one_year_goals` JSON array. All
+// mutations write the full array back via PUT /api/vto so we keep stable
+// goal ids (server stamps them) and don't lose archived entries.
+
+let goalDraftOwners = [];
+
+function openGoalModal(goalId) {
+  const goal = goalId
+    ? (state.vto?.one_year_goals || []).find(g => g.id === goalId)
+    : null;
+  qs('#goal-modal-title').textContent = goal ? 'Edit Goal' : 'Add Goal';
+  qs('#goal-id').value = goal ? goal.id : '';
+  qs('#goal-text').value = goal ? (goal.text || '') : '';
+
+  const initOwnerIds = goal
+    ? (Array.isArray(goal.owner_ids) && goal.owner_ids.length
+        ? goal.owner_ids.map(id => +id)
+        : (goal.owner_id ? [+goal.owner_id] : []))
+    : (state.currentUser ? [state.currentUser.id] : []);
+  goalDraftOwners = [...initOwnerIds];
+
+  const chips = qs('#goal-owners-chips');
+  chips.innerHTML = '';
+  state.users.forEach(u => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'vto-owner-chip' + (goalDraftOwners.includes(u.id) ? ' selected' : '');
+    chip.textContent = u.name;
+    chip.onclick = () => {
+      const idx = goalDraftOwners.indexOf(u.id);
+      if (idx >= 0) goalDraftOwners.splice(idx, 1);
+      else goalDraftOwners.push(u.id);
+      chip.classList.toggle('selected');
+    };
+    chips.appendChild(chip);
+  });
+
+  openModal('goal-modal');
+  qs('#goal-text').focus();
+}
+
+async function saveGoalFromModal() {
+  const id   = qs('#goal-id').value;
+  const text = qs('#goal-text').value.trim();
+  if (!text) { qs('#goal-text').focus(); return; }
+  const owner_ids = [...goalDraftOwners].map(x => +x).filter(Boolean);
+  const owner_id  = owner_ids[0] || null;
+
+  const existing = (state.vto?.one_year_goals || []).slice();
+  let next;
+  if (id) {
+    next = existing.map(g => g.id === id
+      ? { ...g, text, owner_ids, owner_id }
+      : g);
+  } else {
+    next = [...existing, { text, owner_ids, owner_id }];
+  }
+  try {
+    const updated = await api.put('/api/vto', { one_year_goals: next });
+    state.vto = updated || state.vto;
+    closeModal('goal-modal');
+    renderGoals();
+  } catch (e) { alert(e.message); }
+}
+
+async function toggleGoalArchive(goalId) {
+  const existing = (state.vto?.one_year_goals || []).slice();
+  const next = existing.map(g => g.id === goalId
+    ? { ...g, archived: !g.archived }
+    : g);
+  try {
+    const updated = await api.put('/api/vto', { one_year_goals: next });
+    state.vto = updated || state.vto;
+    renderGoals();
+  } catch (e) { alert(e.message); }
+}
+
+function confirmDeleteGoal(goalId) {
+  const goal = (state.vto?.one_year_goals || []).find(g => g.id === goalId);
+  if (!goal) return;
+  const linkedRocks = (state.rocks || []).filter(r => r.goal_id === goalId).length;
+  state.pendingDelete = { type: 'goal', id: goalId };
+  const linkNote = linkedRocks
+    ? ` ${linkedRocks} rock${linkedRocks === 1 ? ' is' : 's are'} linked to this goal — they will be unlinked.`
+    : '';
+  qs('#confirm-message').textContent = `Delete "${goal.text || 'this goal'}"? This cannot be undone.${linkNote}`;
+  openModal('confirm-modal');
+}
+
+async function deleteGoal(goalId) {
+  const existing = (state.vto?.one_year_goals || []).slice();
+  const next = existing.filter(g => g.id !== goalId);
+  // Unlink rocks that pointed at this goal so they don't dangle.
+  const orphanedRocks = (state.rocks || []).filter(r => r.goal_id === goalId);
+  await api.put('/api/vto', { one_year_goals: next }).then(v => { state.vto = v || state.vto; });
+  for (const r of orphanedRocks) {
+    try { await api.put(`/api/rocks/${r.id}`, { ...r, goal_id: null }); } catch (e) { /* keep going */ }
+  }
+}
+
+qs('#add-goal-btn')?.addEventListener('click', () => openGoalModal(null));
+qs('#save-goal-btn')?.addEventListener('click', saveGoalFromModal);
 
 async function loadAll() {
   await Promise.all([

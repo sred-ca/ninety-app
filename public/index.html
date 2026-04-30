@@ -251,6 +251,12 @@
             <h1>Goals</h1>
             <p class="view-subtitle" id="goals-subtitle">Annual goals with their rocks and to-dos</p>
           </div>
+          <div class="view-header-right">
+            <button class="btn btn-primary" id="add-goal-btn" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Goal
+            </button>
+          </div>
         </div>
         <div id="goals-tree"></div>
       </section>
@@ -324,6 +330,9 @@
               <button type="button" class="view-mode-btn" data-mode="list" title="List view">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
               </button>
+              <button type="button" class="view-mode-btn" data-mode="kanban" title="Kanban view">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="11" y="3" width="6" height="12" rx="1"/><rect x="19" y="3" width="2" height="8" rx="1"/></svg>
+              </button>
             </div>
             <div class="view-mode-toggle" id="issue-sort-toggle" style="margin-left: 6px;">
               <button type="button" class="view-mode-btn" id="issue-sort-due-btn" title="Sort by due date — most urgent first">
@@ -341,6 +350,7 @@
         <div class="stats-bar" id="issues-stats"></div>
 
         <div id="issues-list" class="issues-grid"></div>
+        <div id="issues-kanban" class="kanban-board" hidden></div>
         <div id="issues-table" class="card" hidden>
           <div class="table-header issues-table-header">
             <span class="th">To-Do</span>
@@ -824,6 +834,31 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" data-modal="edit-attendees-modal">Cancel</button>
         <button class="btn btn-primary" id="save-attendees-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Goal Modal ─────────────────────────────────────────────── -->
+  <div id="goal-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="goal-modal-title">Add Goal</h3>
+        <button class="modal-close" data-modal="goal-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="goal-id" />
+        <div class="form-group">
+          <label>Goal *</label>
+          <input type="text" id="goal-text" placeholder="What do you want to achieve this year?" />
+        </div>
+        <div class="form-group">
+          <label>Owners</label>
+          <div class="vto-owner-chips" id="goal-owners-chips"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="goal-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-goal-btn">Save Goal</button>
       </div>
     </div>
   </div>
