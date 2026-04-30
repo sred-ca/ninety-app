@@ -19,6 +19,7 @@ const state = {
   issueOwnerFilter: [],
   issueVisibilityFilter: 'public',
   issueViewMode: 'cards',
+  issueSortByDue: false,
   // Team Issues (IDS discussion items — distinct from the "To-Dos" feature above)
   teamIssues: [],
   teamIssueHorizonFilter: 'short_term',
@@ -259,7 +260,23 @@ function enterApp(user) {
   api.get('/api/coaching/enabled').then(d => {
     if (!(d && d.enabled)) qs('#stella-nav-item').style.display = 'none';
   }).catch(() => { /* silent — coaching flag is optional */ });
-  loadAll();
+  loadAll().then(maybeOpenDeepLinkedIssue);
+}
+
+// If the URL has ?issue=<id>, switch to the To-Dos tab and open that
+// issue's modal once issues are loaded. One-shot — strips the param after
+// so a refresh doesn't replay the open.
+function maybeOpenDeepLinkedIssue() {
+  const id = +(new URLSearchParams(location.search).get('issue') || 0);
+  if (!id) return;
+  const issue = state.issues.find(i => i.id === id);
+  if (!issue) return;
+  const navBtn = qs('.nav-item[data-view="issues"]');
+  if (navBtn) navBtn.click();
+  openIssueModal(id);
+  const url = new URL(location.href);
+  url.searchParams.delete('issue');
+  history.replaceState(null, '', url.toString());
 }
 
 function applyTabVisibility(user) {
@@ -882,6 +899,15 @@ function renderIssues() {
       ? ownerScoped.filter(i => i.status === statusFilter && !i.archived)
       : ownerScoped.filter(i => !i.archived);
 
+  // Optional sort: most urgent first (ascending by due_date; nulls last)
+  if (state.issueSortByDue) {
+    filtered.sort((a, b) => {
+      const da = a.due_date || '9999-12-31';
+      const db = b.due_date || '9999-12-31';
+      return da.localeCompare(db);
+    });
+  }
+
   // Stats: exclude archived from counts; Total = all open (non-solved)
   const activeIssues = inScope.filter(i => !i.archived);
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
@@ -1042,6 +1068,21 @@ qsa('#issue-view-toggle .view-mode-btn').forEach(btn => {
     try { localStorage.setItem(ISSUE_VIEW_MODE_KEY, btn.dataset.mode); } catch {}
     renderIssues();
   });
+});
+
+/* Issue sort-by-due toggle — when on, urgent first (asc by due_date) */
+const ISSUE_SORT_DUE_KEY = 'ninety.issueSortByDue';
+{
+  if (localStorage.getItem(ISSUE_SORT_DUE_KEY) === '1') {
+    state.issueSortByDue = true;
+    qs('#issue-sort-due-btn')?.classList.add('active');
+  }
+}
+qs('#issue-sort-due-btn')?.addEventListener('click', () => {
+  state.issueSortByDue = !state.issueSortByDue;
+  qs('#issue-sort-due-btn').classList.toggle('active', state.issueSortByDue);
+  try { localStorage.setItem(ISSUE_SORT_DUE_KEY, state.issueSortByDue ? '1' : '0'); } catch {}
+  renderIssues();
 });
 
 /* Issue visibility tabs (Public / Private) */
