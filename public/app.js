@@ -437,9 +437,9 @@ async function populateQuarterFilter() {
 /* Add Rock modal */
 qs('#add-rock-btn').addEventListener('click', () => openRockModal(null));
 
-function openRockModal(editId) {
+function openRockModal(editId, prefill = {}) {
   const rock = editId ? state.rocks.find(r => r.id === editId) : null;
-  qs('#rock-modal-title').textContent = rock ? 'Edit Rock' : 'Add Rock';
+  qs('#rock-modal-title').textContent = rock ? 'Edit Rock' : (prefill.titlePrefix || 'Add Rock');
   qs('#rock-id').value = rock ? rock.id : '';
   qs('#rock-title').value = rock ? rock.title : '';
   qs('#rock-description').value = rock ? (rock.description || '') : '';
@@ -458,16 +458,19 @@ function openRockModal(editId) {
   // Populate quarter dropdown
   const allQ = [...new Set([currentQuarter(), ...quarters(8)])];
   const qSel = qs('#rock-quarter');
-  qSel.innerHTML = allQ.map(q => `<option value="${q}" ${rock ? (rock.quarter === q ? 'selected' : '') : (q === (state.quarterFilter || currentQuarter()) ? 'selected' : '')}>${q}</option>`).join('');
+  const defaultQ = rock
+    ? rock.quarter
+    : (prefill.quarter || state.quarterFilter || currentQuarter());
+  qSel.innerHTML = allQ.map(q => `<option value="${q}" ${q === defaultQ ? 'selected' : ''}>${q}</option>`).join('');
 
   // Populate goal dropdown from V/TO annual goals (skip archived, but still
   // show the linked archived goal for an existing rock so the link is visible).
   const goalSel = qs('#rock-goal');
   const allGoals = (state.vto?.one_year_goals) || [];
-  const visibleGoals = allGoals.filter(g => !g.archived
-    || (rock && rock.goal_id === g.id));
+  const selectedGoalId = rock ? rock.goal_id : (prefill.goal_id || '');
+  const visibleGoals = allGoals.filter(g => !g.archived || g.id === selectedGoalId);
   goalSel.innerHTML = '<option value="">— No goal —</option>' +
-    visibleGoals.map((g, i) => `<option value="${esc(g.id || '')}" ${rock && rock.goal_id === g.id ? 'selected' : ''}>${i + 1}. ${esc((g.text || '').slice(0, 80))}${g.archived ? ' (archived)' : ''}</option>`).join('');
+    visibleGoals.map((g, i) => `<option value="${esc(g.id || '')}" ${selectedGoalId === g.id ? 'selected' : ''}>${i + 1}. ${esc((g.text || '').slice(0, 80))}${g.archived ? ' (archived)' : ''}</option>`).join('');
 
   // Milestones section — only shown when editing an existing rock.
   state.currentMilestones = [];
@@ -626,6 +629,8 @@ qs('#save-rock-btn').addEventListener('click', async () => {
     }
     closeModal('rock-modal');
     loadRocks();
+    // If the Goals tab is the active view, refresh its rock-keyed render too.
+    if (qs('#view-goals')?.classList.contains('active')) loadGoals();
   } catch (e) { alert(e.message); }
 });
 
@@ -4818,7 +4823,7 @@ function renderGoals() {
   const sub   = qs('#goals-subtitle');
   if (state.vto?.one_year_future_date) {
     const fy = new Date(state.vto.one_year_future_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-    sub.textContent = `Annual goals to ${fy} — drill into rocks and to-dos`;
+    sub.textContent = `Annual goals to ${fy} — quarterly milestones (rocks) ladder up to each goal`;
   }
   qs('#add-goal-btn').hidden = !canEditGoals();
 
@@ -4897,6 +4902,18 @@ function renderGoals() {
       confirmDeleteGoal(el.dataset.goalDelete);
     });
   });
+  root.querySelectorAll('[data-goal-add-milestone]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Open the Rock modal pre-filled to link to this goal at the current quarter.
+      // The user-facing word is "milestone"; the underlying record is a Rock.
+      openRockModal(null, {
+        goal_id: el.dataset.goalAddMilestone,
+        quarter: currentQuarter(),
+        titlePrefix: 'Add Milestone',
+      });
+    });
+  });
   const archToggle = qs('#goals-archived-toggle');
   if (archToggle) archToggle.addEventListener('click', () => {
     goalsState.showArchived = !goalsState.showArchived;
@@ -4921,19 +4938,50 @@ function renderGoalCard(goal, idx, opts = {}) {
     ? owners.map(o => `<span class="goal-owner">${esc(o.name?.split(' ')[0] || '—')}</span>`).join('')
     : '<span class="goal-owner goal-owner-empty">No owner</span>';
 
-  // Sort rocks by quarter then status (done last)
+  // Group rocks by quarter so the goal reads like a year-long arc of milestones.
+  // Within each quarter, sort active first then done.
   const statusOrder = { not_started: 0, on_track: 1, off_track: 2, done: 3 };
-  goalRocks.sort((a, b) => (a.quarter || '').localeCompare(b.quarter || '')
-    || (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
-
-  const rocksHtml = expanded
-    ? (totalRocks === 0
-        ? `<div class="goal-empty">No rocks linked to this goal yet — link one when you add or edit a rock.</div>`
-        : goalRocks.map(r => renderRockRow(r)).join(''))
-    : '';
+  const byQuarter = new Map();
+  goalRocks.forEach(r => {
+    const q = r.quarter || 'Unscheduled';
+    if (!byQuarter.has(q)) byQuarter.set(q, []);
+    byQuarter.get(q).push(r);
+  });
+  const sortedQuarters = [...byQuarter.keys()].sort((a, b) => a.localeCompare(b));
+  sortedQuarters.forEach(q => {
+    byQuarter.get(q).sort((a, b) => (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99));
+  });
 
   const isArchived = !!opts.archived;
   const canEdit    = canEditGoals();
+
+  const milestonesHtml = sortedQuarters.length === 0
+    ? `<div class="goal-empty">No milestones linked yet — milestones are quarterly rocks that ladder up to this goal.</div>`
+    : sortedQuarters.map(q => `
+        <div class="goal-quarter-group">
+          <div class="goal-quarter-header">
+            <span class="goal-quarter-label">${esc(q)}</span>
+            <span class="goal-quarter-count">${byQuarter.get(q).length} milestone${byQuarter.get(q).length === 1 ? '' : 's'}</span>
+          </div>
+          ${byQuarter.get(q).map(r => renderRockRow(r)).join('')}
+        </div>
+      `).join('');
+
+  const addMilestoneBtn = (canEdit && !isArchived) ? `
+    <button class="btn btn-ghost btn-sm goal-add-milestone" data-goal-add-milestone="${esc(goal.id)}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add milestone
+    </button>
+  ` : '';
+
+  const descriptionHtml = goal.description
+    ? `<div class="goal-card-description">${esc(goal.description)}</div>`
+    : '';
+
+  const rocksHtml = expanded
+    ? `<div class="goal-card-body-inner">${milestonesHtml}${addMilestoneBtn}</div>`
+    : '';
+
   const actionsHtml = canEdit ? `
     <div class="goal-card-actions" onclick="event.stopPropagation()">
       ${!isArchived ? `<button class="icon-btn" data-goal-edit="${esc(goal.id)}" title="Edit goal">
@@ -4956,10 +5004,11 @@ function renderGoalCard(goal, idx, opts = {}) {
         <div class="goal-card-num">${idx + 1}</div>
         <div class="goal-card-main">
           <div class="goal-card-title">${esc(goal.text || '')}</div>
+          ${descriptionHtml}
           <div class="goal-card-meta">
             ${ownersHtml}
             <span class="goal-progress-summary">
-              ${doneRocks} / ${totalRocks} rock${totalRocks === 1 ? '' : 's'} done
+              ${doneRocks} / ${totalRocks} milestone${totalRocks === 1 ? '' : 's'} done
             </span>
           </div>
         </div>
@@ -5040,6 +5089,7 @@ function openGoalModal(goalId) {
   qs('#goal-modal-title').textContent = goal ? 'Edit Goal' : 'Add Goal';
   qs('#goal-id').value = goal ? goal.id : '';
   qs('#goal-text').value = goal ? (goal.text || '') : '';
+  qs('#goal-description').value = goal ? (goal.description || '') : '';
 
   const initOwnerIds = goal
     ? (Array.isArray(goal.owner_ids) && goal.owner_ids.length
@@ -5072,6 +5122,7 @@ async function saveGoalFromModal() {
   const id   = qs('#goal-id').value;
   const text = qs('#goal-text').value.trim();
   if (!text) { qs('#goal-text').focus(); return; }
+  const description = qs('#goal-description').value.trim();
   const owner_ids = [...goalDraftOwners].map(x => +x).filter(Boolean);
   const owner_id  = owner_ids[0] || null;
 
@@ -5079,10 +5130,10 @@ async function saveGoalFromModal() {
   let next;
   if (id) {
     next = existing.map(g => g.id === id
-      ? { ...g, text, owner_ids, owner_id }
+      ? { ...g, text, description, owner_ids, owner_id }
       : g);
   } else {
-    next = [...existing, { text, owner_ids, owner_id }];
+    next = [...existing, { text, description, owner_ids, owner_id }];
   }
   try {
     const updated = await api.put('/api/vto', { one_year_goals: next });
