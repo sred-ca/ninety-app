@@ -318,10 +318,11 @@
             </div>
             <div class="filter-tabs" id="issue-filter-tabs">
               <button class="filter-tab" data-status="">All</button>
+              <button class="filter-tab" data-status="not_started">Not Started</button>
               <button class="filter-tab active" data-status="in_progress">In Progress</button>
               <button class="filter-tab" data-status="waiting_for">Waiting For</button>
-              <button class="filter-tab" data-status="blocker">Blocker</button>
-              <button class="filter-tab" data-status="solved">Solved</button>
+              <button class="filter-tab" data-status="blocker">Blocked</button>
+              <button class="filter-tab" data-status="solved">Complete</button>
             </div>
             <div class="view-mode-toggle" id="issue-view-toggle">
               <button type="button" class="view-mode-btn active" data-mode="cards" title="Card view">
@@ -978,10 +979,11 @@
           <div class="form-group" id="issue-status-group" style="display:none">
             <label>Status</label>
             <select id="issue-status" class="select-input">
+              <option value="not_started">Not Started</option>
               <option value="in_progress">In Progress</option>
               <option value="waiting_for">Waiting For</option>
-              <option value="blocker">Blocker</option>
-              <option value="solved">Solved</option>
+              <option value="blocker">Blocked</option>
+              <option value="solved">Complete</option>
             </select>
           </div>
         </div>

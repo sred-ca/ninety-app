@@ -101,7 +101,7 @@ function requireOwner(req, res, next) {
 function allow(value, allowed) {
   return value === undefined || value === null || allowed.includes(value);
 }
-const STATUS_ISSUE   = ['in_progress', 'waiting_for', 'blocker', 'solved'];
+const STATUS_ISSUE   = ['not_started', 'in_progress', 'waiting_for', 'blocker', 'solved'];
 const STATUS_ROCK    = ['not_started', 'on_track', 'off_track', 'done'];
 const STATUS_MEETING = ['upcoming', 'in_progress', 'completed'];
 const PRIORITY_VALS  = ['low', 'medium', 'high'];

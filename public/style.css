@@ -353,6 +353,7 @@ body {
 .badge-done      { background: var(--blue-bg);   color: var(--blue); }
 .badge-not_started{ background: var(--surface3); color: var(--text2); }
 
+.badge-not_started { background: var(--surface3);  color: var(--text2); }
 .badge-in_progress { background: var(--blue-bg);   color: var(--blue); }
 .badge-waiting_for { background: var(--yellow-bg); color: var(--yellow); }
 .badge-blocker     { background: var(--red-bg);    color: var(--red); }
@@ -399,9 +400,11 @@ body {
 /* ── Kanban board ─────────────────────────────────────────────────── */
 .kanban-board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
   gap: 14px;
   align-items: start;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 .kanban-column {
   background: var(--surface);
@@ -421,6 +424,7 @@ body {
   text-transform: uppercase; letter-spacing: 0.6px;
   color: var(--text2);
 }
+.kanban-column--not_started .kanban-column-head { color: var(--text2); }
 .kanban-column--in_progress .kanban-column-head { color: var(--accent); }
 .kanban-column--waiting_for .kanban-column-head { color: var(--yellow); }
 .kanban-column--blocker     .kanban-column-head { color: var(--red); }
@@ -474,12 +478,12 @@ body {
 }
 .kanban-card--private { border-left: 3px solid var(--text2); }
 
-@media (max-width: 1100px) {
-  .kanban-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 640px) {
-  .kanban-board { grid-template-columns: 1fr; }
-  .kanban-column { max-height: none; }
+@media (max-width: 1280px) {
+  .kanban-board {
+    grid-auto-flow: column;
+    grid-auto-columns: 240px;
+    grid-template-columns: none;
+  }
 }
 
 .issue-card {
@@ -1397,6 +1401,7 @@ textarea { resize: vertical; min-height: 72px; }
 .runner-todo-filter-dot.blocker     { background: var(--red); }
 .runner-todo-filter-dot.waiting_for { background: var(--yellow); }
 .runner-todo-filter-dot.in_progress { background: var(--blue); }
+.runner-todo-filter-dot.not_started { background: var(--text2); }
 .runner-todo-count {
   margin-left: auto;
   font-size: 12px;
@@ -3328,6 +3333,7 @@ textarea { resize: vertical; min-height: 72px; }
   font-size: 10px; padding: 1px 7px; border-radius: 999px;
   text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
 }
+.goal-todo-status--not_started { background: var(--surface3);  color: var(--text2); }
 .goal-todo-status--in_progress { background: var(--blue-bg);   color: var(--blue); }
 .goal-todo-status--waiting_for { background: var(--yellow-bg); color: var(--yellow); }
 .goal-todo-status--blocker     { background: var(--red-bg);    color: var(--red); }
