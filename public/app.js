@@ -3822,11 +3822,16 @@ function renderVtoOneYear() {
   if (goals.length) {
     const gWrap = document.createElement('div'); gWrap.className = 'vto-subsection';
     const h = document.createElement('h4'); h.textContent = 'Goals for the Year'; gWrap.appendChild(h);
-    const ul = document.createElement('ul'); ul.className = 'vto-goals-list';
+    const ol = document.createElement('ol'); ol.className = 'vto-goals-list';
     goals.forEach(g => {
       const li = document.createElement('li');
-      const text = document.createElement('span'); text.textContent = g.text || '';
-      li.appendChild(text);
+
+      const head = document.createElement('div'); head.className = 'vto-goal-head';
+      const title = document.createElement('span');
+      title.className = 'vto-goal-title';
+      title.textContent = g.text || '';
+      head.appendChild(title);
+
       const ownerIds = Array.isArray(g.owner_ids) && g.owner_ids.length
         ? g.owner_ids
         : (g.owner_id ? [+g.owner_id] : []);
@@ -3836,11 +3841,19 @@ function renderVtoOneYear() {
         const tag = document.createElement('span');
         tag.className = 'vto-goal-owner';
         tag.textContent = owner.name;
-        li.appendChild(tag);
+        head.appendChild(tag);
       });
-      ul.appendChild(li);
+      li.appendChild(head);
+
+      if (g.description) {
+        const desc = document.createElement('div');
+        desc.className = 'vto-goal-description';
+        desc.textContent = g.description;
+        li.appendChild(desc);
+      }
+      ol.appendChild(li);
     });
-    gWrap.appendChild(ul);
+    gWrap.appendChild(ol);
     body.appendChild(gWrap);
   }
 }

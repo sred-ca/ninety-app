@@ -445,6 +445,12 @@ app.get('/api/coaching/admin/user-state', requireCoachingFlag, requireAdminKey, 
   });
 }));
 
+// Admin V/TO read (admin-key auth, no session). Returns the full V/TO doc
+// so CLI tools can read goal IDs etc. before sending an update.
+app.get('/api/admin/vto', requireAdminKey, wrap(async (req, res) => {
+  ok(res, await vtoQueries.getOrCreate());
+}));
+
 // Admin V/TO update (admin-key auth, no session). Mirrors PUT /api/vto.
 // Used for bulk content updates from CLI / external tooling.
 app.put('/api/admin/vto', requireAdminKey, wrap(async (req, res) => {

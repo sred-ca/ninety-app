@@ -136,6 +136,13 @@
     }
     .value-list li strong { color: var(--dark-blue); font-weight: 700; }
     .goal-list li strong { color: var(--dark-blue); font-weight: 700; margin-right: 6px; }
+    .goal-list li { margin: 10px 0; }
+    .goal-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+    .goal-title { color: var(--dark-blue); font-weight: 700; }
+    .goal-description {
+      font-family: 'Lato', sans-serif; font-size: 10.5px; line-height: 1.5;
+      color: var(--gray); margin-top: 4px; white-space: pre-wrap;
+    }
     .uniques {
       padding-left: 18px; margin: 8px 0;
       counter-reset: unique-counter;
@@ -361,8 +368,16 @@
       const printableGoals = (vto.one_year_goals || []).filter(g => !g.archived);
       const oneGoals = printableGoals.length
         ? `<ol class="goal-list">${printableGoals.map(g => {
-            const owner = g.owner_id && userById[g.owner_id] ? `<span class="owner-tag">${esc(userById[g.owner_id].name)}</span>` : '';
-            return `<li>${esc(g.text || '')}${owner}</li>`;
+            const ownerIds = Array.isArray(g.owner_ids) && g.owner_ids.length
+              ? g.owner_ids
+              : (g.owner_id ? [g.owner_id] : []);
+            const owners = ownerIds
+              .map(id => userById[id] ? `<span class="owner-tag">${esc(userById[id].name)}</span>` : '')
+              .join('');
+            const desc = g.description
+              ? `<div class="goal-description">${esc(g.description)}</div>`
+              : '';
+            return `<li><div class="goal-head"><span class="goal-title">${esc(g.text || '')}</span>${owners}</div>${desc}</li>`;
           }).join('')}</ol>`
         : '<p class="body"><em>No goals recorded.</em></p>';
 
