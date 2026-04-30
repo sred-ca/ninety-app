@@ -3456,4 +3456,28 @@ textarea { resize: vertical; min-height: 72px; }
   /* Make room for the floating hamburger and tighten view padding. */
   .main { padding-top: 56px; }
   .view { padding: 16px; }
+
+  /* View header collapses cleanly on phones — title stacks above filters,
+     filter strips can scroll horizontally if there are too many tabs to fit
+     (e.g. To-Dos has 6 status filters that previously pushed off-screen). */
+  .view-header        { gap: 12px; margin-bottom: 16px; }
+  .view-header h1     { font-size: 22px; }
+  .view-header-right  { width: 100%; gap: 6px; }
+  .view-header-right .btn-primary { margin-left: auto; }
+
+  /* Horizontal scroll for tab/toggle strips that don't fit the viewport.
+     Each strip stays as a single segmented control instead of wrapping
+     mid-row, which would break the segmented-control look. */
+  .filter-tabs,
+  .view-mode-toggle {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;       /* Firefox */
+  }
+  .filter-tabs::-webkit-scrollbar,
+  .view-mode-toggle::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
+  .filter-tab { padding: 5px 10px; font-size: 11px; }
+
+  /* Owner multiselect button — let it shrink to its label width. */
+  .owner-multiselect-btn { padding: 5px 10px; font-size: 12px; }
 }
