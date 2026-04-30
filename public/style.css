@@ -3393,3 +3393,67 @@ textarea { resize: vertical; min-height: 72px; }
   .goal-card-progress { display: none; }
   .goal-card-body { padding-left: 16px; }
 }
+
+/* ── Mobile sidebar drawer ─────────────────────────────────────────────
+   Default state: hamburger + backdrop are hidden on desktop. The
+   @media block below flips the layout to an off-canvas drawer at phone
+   widths. Desktop layout (220px sidebar | 1fr main) is untouched. */
+.mobile-menu-btn      { display: none; }
+.mobile-menu-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  /* Sidebar becomes an off-canvas drawer; main takes the full width. */
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1500;             /* above modals (1000), below runner (2000) */
+    transform: translateX(-100%);
+    transition: transform 200ms ease-out;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  .app.mobile-nav-open .sidebar {
+    transform: translateX(0);
+  }
+
+  /* Hamburger button — floats top-left over the content. */
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    width: 40px;
+    height: 40px;
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .mobile-menu-btn svg { width: 20px; height: 20px; }
+
+  /* Dimmed backdrop fades in when the drawer is open. */
+  .mobile-menu-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1400;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease-out;
+  }
+  .app.mobile-nav-open .mobile-menu-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Make room for the floating hamburger and tighten view padding. */
+  .main { padding-top: 56px; }
+  .view { padding: 16px; }
+}

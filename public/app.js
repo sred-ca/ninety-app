@@ -315,7 +315,19 @@ qsa('.nav-item').forEach(btn => {
     if (view === 'goals')     loadGoals();
     if (view === 'budget')    loadBudget();
     if (view === 'admin')     loadAdmin();
+    // Close the mobile drawer when the user picks a tab. No-op on desktop.
+    qs('#app').classList.remove('mobile-nav-open');
   });
+});
+
+/* ── Mobile nav drawer ───────────────────────────────────────────────
+   Tapping the hamburger toggles the drawer; the backdrop closes it.
+   The nav-item handler above also closes the drawer on tab change. */
+qs('#mobile-menu-btn').addEventListener('click', () => {
+  qs('#app').classList.toggle('mobile-nav-open');
+});
+qs('#mobile-menu-backdrop').addEventListener('click', () => {
+  qs('#app').classList.remove('mobile-nav-open');
 });
 
 /* ── Modal close buttons ─────────────────────────────────────────── */
@@ -2428,6 +2440,8 @@ document.addEventListener('keydown', e => {
     qsa('.modal-overlay.active').forEach(m => {
       closeModal(m.id);
     });
+    // Also close the mobile nav drawer if it's open. No-op on desktop.
+    qs('#app').classList.remove('mobile-nav-open');
   }
 });
 

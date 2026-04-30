@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=22" />
+  <link rel="stylesheet" href="style.css?v=23" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -32,6 +32,16 @@
 
   <!-- ── App Shell ─────────────────────────────────────────────── -->
   <div id="app" class="app hidden">
+
+    <!-- Mobile-only: hamburger toggle + backdrop. Hidden by CSS on desktop. -->
+    <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Open navigation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+    <div id="mobile-menu-backdrop" class="mobile-menu-backdrop"></div>
 
     <!-- Sidebar -->
     <aside class="sidebar">
