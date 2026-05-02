@@ -17,7 +17,6 @@ const state = {
   currentMilestoneRockId: null,
   issueStatusFilter: 'in_progress',
   issueOwnerFilter: [],
-  issueVisibilityFilter: 'public',
   issueViewMode: 'cards',
   issueSortByDue: false,
   // Team Issues (IDS discussion items — distinct from the "To-Dos" feature above)
@@ -1011,10 +1010,10 @@ function renderIssues() {
   const statusTabs = qs('#issue-filter-tabs');
   if (statusTabs) statusTabs.style.display = kanbanMode ? 'none' : '';
 
-  // Scope everything (list + stats) to the current visibility tab
-  const inScope = state.issues.filter(i =>
-    state.issueVisibilityFilter === 'private' ? i.private : !i.private
-  );
+  // No visibility tab anymore — render everything the user is allowed to see
+  // (server already filters out other people's private to-dos), then split
+  // public-vs-private at render time below. The user sees one combined queue.
+  const inScope = state.issues;
 
   // Apply owner filter client-side (multi-select; empty = no filter)
   const ownerIds = state.issueOwnerFilter.map(Number);
@@ -1068,8 +1067,28 @@ function renderIssues() {
   if (filtered.length === 0) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
+  // Build a section divider (horizontal lines + centered label). Reuses the
+  // same `archived-section-header` styling as the solved-tab archived split.
+  const makeDivider = (svgInner, label, count) => {
+    const div = document.createElement('div');
+    div.className = 'archived-section-header';
+    div.innerHTML = `
+      <div class="archived-header-line"></div>
+      <span class="archived-header-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0">${svgInner}</svg>
+        ${label} &middot; ${count}
+      </span>
+      <div class="archived-header-line"></div>
+    `;
+    return div;
+  };
+  // SVG paths reused below.
+  const ARCHIVE_ICON = '<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>';
+  const LOCK_ICON    = '<rect x="5" y="11" width="14" height="9" rx="2" ry="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>';
+
   if (state.issueStatusFilter === 'solved') {
-    // Solved tab: active solved first, then archived under a divider
+    // Solved tab: active solved first, then archived under a divider.
+    // Privacy split is skipped here — focus is "what's done."
     const activeSolved   = filtered.filter(i => !i.archived);
     const archivedSolved = filtered.filter(i =>  i.archived);
 
@@ -1080,24 +1099,22 @@ function renderIssues() {
     activeSolved.forEach(issue => container.appendChild(buildFn(issue)));
 
     if (archivedSolved.length > 0) {
-      const divider = document.createElement('div');
-      divider.className = 'archived-section-header';
-      divider.innerHTML = `
-        <div class="archived-header-line"></div>
-        <span class="archived-header-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0">
-            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/>
-            <line x1="10" y1="12" x2="14" y2="12"/>
-          </svg>
-          Archived &middot; ${archivedSolved.length}
-        </span>
-        <div class="archived-header-line"></div>
-      `;
-      container.appendChild(divider);
+      container.appendChild(makeDivider(ARCHIVE_ICON, 'Archived', archivedSolved.length));
       archivedSolved.forEach(issue => container.appendChild(buildFn(issue)));
     }
   } else {
-    filtered.forEach(issue => container.appendChild(buildFn(issue)));
+    // Public/private split: public first, then private below a divider.
+    // The server already filters so non-owners never see other users'
+    // private rows — the private section here is the user's own queue.
+    const publicItems  = filtered.filter(i => !i.private);
+    const privateItems = filtered.filter(i =>  i.private);
+
+    publicItems.forEach(issue => container.appendChild(buildFn(issue)));
+
+    if (privateItems.length > 0) {
+      container.appendChild(makeDivider(LOCK_ICON, 'Private', privateItems.length));
+      privateItems.forEach(issue => container.appendChild(buildFn(issue)));
+    }
   }
 
   // ── Events ────────────────────────────────────────────────────────
@@ -1227,16 +1244,6 @@ qs('#issue-sort-due-btn')?.addEventListener('click', () => {
   renderIssues();
 });
 
-/* Issue visibility tabs (Public / Private) */
-qsa('#issue-visibility-tabs .filter-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    qsa('#issue-visibility-tabs .filter-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    state.issueVisibilityFilter = tab.dataset.visibility;
-    renderIssues();
-  });
-});
-
 /* Issue filter tabs (client-side; stats bar stays full) */
 qsa('#issue-filter-tabs .filter-tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -1259,7 +1266,9 @@ function openIssueModal(editId) {
   qs('#issue-priority').value = issue ? issue.priority : 'medium';
   qs('#issue-status').value = issue ? issue.status : 'in_progress';
   qs('#issue-status-group').style.display = 'flex';
-  qs('#issue-private').checked = issue ? !!issue.private : (state.issueVisibilityFilter === 'private');
+  // New to-dos default to public; the user explicitly checks the box to make
+  // a to-do private. Editing preserves the existing scope.
+  qs('#issue-private').checked = issue ? !!issue.private : false;
 
   // Due date: existing value or default to 5 business days from today
   qs('#issue-due-date').value = issue
