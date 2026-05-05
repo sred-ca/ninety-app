@@ -489,23 +489,43 @@ app.put('/api/coaching/assistant-prompt', requireCoachingFlag, requireAdminKey, 
 // Auth: accepts admin key via Authorization header, x-vapi-secret header,
 // OR a ?token= query param (phone-number-level webhooks don't support secrets).
 function requireWebhookAuth(req, res, next) {
-  if (!NINETY_ADMIN_KEY) return fail(res, 'Coaching admin key not configured', 500);
+  if (!NINETY_ADMIN_KEY) {
+    console.log('[VAPI-AUTH] FAIL: NINETY_ADMIN_KEY env var not set');
+    return fail(res, 'Coaching admin key not configured', 500);
+  }
+  const headerNames = Object.keys(req.headers).filter(h => /auth|secret|vapi|signature/i.test(h));
+  const tokenSource = req.headers['authorization'] ? 'authorization-header'
+    : req.headers['x-vapi-secret'] ? 'x-vapi-secret-header'
+    : req.query.token ? 'query-token'
+    : 'none';
   const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim()
     || (req.headers['x-vapi-secret'] || '').trim()
     || (req.query.token || '').trim();
+  console.log('[VAPI-AUTH]', JSON.stringify({
+    tokenSource,
+    tokenLen: token.length,
+    expectedLen: NINETY_ADMIN_KEY.length,
+    relevantHeaders: headerNames,
+    userAgent: req.headers['user-agent'],
+    ip: req.headers['x-forwarded-for'] || req.ip,
+  }));
   const a = Buffer.from(token);
   const b = Buffer.from(NINETY_ADMIN_KEY);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fail(res, 'Unauthorized', 401);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    console.log('[VAPI-AUTH] FAIL: token mismatch (a=' + a.length + ', b=' + b.length + ')');
+    return fail(res, 'Unauthorized', 401);
+  }
+  console.log('[VAPI-AUTH] OK');
   next();
 }
 app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireWebhookAuth, wrap(async (req, res) => {
-  // VAPI webhook payload shape:
-  //   { message: { type: 'assistant-request', call: { customer: { number: '+1...' } } } }
+  console.log('[VAPI-WEBHOOK] body=' + JSON.stringify(req.body).slice(0, 800));
   const msg    = req.body?.message || req.body || {};
   const call   = msg.call || {};
   const phone  = call.customer?.number || call.from || null;
 
   const STELLA_ASSISTANT_ID = process.env.STELLA_ASSISTANT_ID;
+  console.log('[VAPI-WEBHOOK] msgType=' + (msg.type || '(none)') + ' phone=' + (phone || '(none)') + ' stellaId=' + (STELLA_ASSISTANT_ID ? STELLA_ASSISTANT_ID.slice(0,8) + '...' : '(unset)'));
 
   const handoff = {
     assistant: {
@@ -513,16 +533,30 @@ app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireWeb
       endCallPhrases: ['goodbye']
     }
   };
-  if (!phone) return res.json(handoff);
+  if (!phone) {
+    console.log('[VAPI-WEBHOOK] HANDOFF: no phone number in payload');
+    return res.json(handoff);
+  }
 
   const u = await userQueries.getByCoachingPhone(phone);
-  if (!u || !u.coaching_enabled) return res.json(handoff);
+  if (!u) {
+    console.log('[VAPI-WEBHOOK] HANDOFF: no user found for phone ' + phone);
+    return res.json(handoff);
+  }
+  if (!u.coaching_enabled) {
+    console.log('[VAPI-WEBHOOK] HANDOFF: user ' + u.id + ' (' + u.name + ') has coaching disabled');
+    return res.json(handoff);
+  }
 
   const p = await coachingQueries.getAssistantPrompt(u.id);
-  if (!p) return res.json(handoff);  // no prompt built yet
+  if (!p) {
+    console.log('[VAPI-WEBHOOK] HANDOFF: no assistant prompt built for user ' + u.id);
+    return res.json(handoff);
+  }
 
-  // Return the base Stella assistant ID + override just the system prompt.
-  // Voice, transcriber, and other config stay on the base assistant in VAPI.
+  const promptLen = (p.system_prompt || '').length;
+  console.log('[VAPI-WEBHOOK] OK: returning override for user ' + u.id + ' (' + u.name + '), prompt=' + promptLen + ' chars, assistantId=' + (STELLA_ASSISTANT_ID || '').slice(0,8) + '...');
+
   res.json({
     assistantId: STELLA_ASSISTANT_ID,
     assistantOverrides: {
