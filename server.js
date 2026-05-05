@@ -594,6 +594,8 @@ app.post('/api/coaching/vapi-assistant-request', requireCoachingFlag, requireWeb
     assistantId: STELLA_ASSISTANT_ID,
     assistantOverrides: {
       model: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
         messages: [{ role: 'system', content: p.system_prompt }]
       },
       metadata: { coaching_user_id: u.id, coaching_user_name: u.name }
