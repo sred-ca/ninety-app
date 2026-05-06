@@ -104,7 +104,7 @@ function allow(value, allowed) {
 const STATUS_ISSUE   = ['in_progress', 'waiting_for', 'blocker', 'solved'];
 const STATUS_ROCK    = ['not_started', 'on_track', 'off_track', 'done'];
 const STATUS_MEETING = ['upcoming', 'in_progress', 'completed'];
-const PRIORITY_VALS  = ['low', 'medium', 'high'];
+const PRIORITY_VALS  = ['priority_1', 'low', 'medium', 'high'];
 const HORIZON_VALS   = ['short_term', 'long_term'];
 
 // ── Google OAuth ─────────────────────────────────────────────────────────────
@@ -1188,6 +1188,11 @@ app.post('/api/issues', wrap(async (req, res) => {
   const { title, description, owner_id, priority, due_date, private: isPrivate, rock_id } = req.body;
   if (!title) return fail(res, 'title is required');
   if (!allow(priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
+  if (priority === 'priority_1' && owner_id) {
+    if (await issueQueries.hasActivePriority1(+owner_id, null)) {
+      return fail(res, 'This user already has an active Priority 1 to-do. Mark it Complete before setting another.');
+    }
+  }
   ok(res, await issueQueries.create({ title, description, owner_id, priority, due_date, private: isPrivate, rock_id }));
 }));
 app.put('/api/issues/:id', wrap(async (req, res) => {
@@ -1197,6 +1202,12 @@ app.put('/api/issues/:id', wrap(async (req, res) => {
   if (!existing) return fail(res, 'to-do not found', 404);
   if (!allow(req.body.status, STATUS_ISSUE)) return fail(res, `status must be one of ${STATUS_ISSUE.join(', ')}`);
   if (!allow(req.body.priority, PRIORITY_VALS)) return fail(res, `priority must be one of ${PRIORITY_VALS.join(', ')}`);
+  if (req.body.priority === 'priority_1') {
+    const newOwnerId = ('owner_id' in req.body ? req.body.owner_id : existing.owner_id);
+    if (newOwnerId && await issueQueries.hasActivePriority1(+newOwnerId, +req.params.id)) {
+      return fail(res, 'This user already has an active Priority 1 to-do. Mark it Complete before setting another.');
+    }
+  }
   ok(res, await issueQueries.update(req.params.id, req.body));
 }));
 app.delete('/api/issues/:id', wrap(async (req, res) => {

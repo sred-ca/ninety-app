@@ -132,6 +132,14 @@ const ISSUE_STATUS_LABELS = {
 };
 function issueStatusLabel(s) { return ISSUE_STATUS_LABELS[s] || s.replace(/_/g, ' '); }
 
+const ISSUE_PRIORITY_LABELS = {
+  priority_1: 'Priority 1',
+  high:       'high',
+  medium:     'medium',
+  low:        'low',
+};
+function issuePriorityLabel(p) { return ISSUE_PRIORITY_LABELS[p] || (p || '').replace(/_/g, ' '); }
+
 function badge(text, cls) {
   const el = document.createElement('span');
   el.className = `badge badge-${cls}`;
@@ -761,7 +769,7 @@ function buildIssueCard(issue) {
     <div class="issue-card-bottom">
       <div class="issue-meta">
         <span class="badge badge-${issue.status}">${issueStatusLabel(issue.status)}</span>
-        <span class="badge badge-${issue.priority}">${issue.priority}</span>
+        <span class="badge badge-${issue.priority}">${issuePriorityLabel(issue.priority)}</span>
       </div>
       <div class="issue-actions">
         ${solveBtn}
@@ -820,7 +828,7 @@ function buildIssueRow(issue) {
     </div>
     <div class="issue-row-owner"></div>
     <div class="issue-row-due">${due ? `<span class="due-date-chip due-${due.urgency}">${due.text}</span>` : '<span style="color:var(--text2)">—</span>'}</div>
-    <div><span class="badge badge-${issue.priority}">${issue.priority}</span></div>
+    <div><span class="badge badge-${issue.priority}">${issuePriorityLabel(issue.priority)}</span></div>
     <div><span class="badge badge-${issue.status}">${statusLabel}</span></div>
     <div class="row-actions">
       ${(!isSolved && !isArchived) ? `<button class="icon-btn solve-issue-btn" data-id="${issue.id}" title="Mark as Solved">
@@ -2948,6 +2956,7 @@ function renderInsightsTodos() {
   const waiting  = filtered.filter(i => i.status === 'waiting_for').length;
   const blocker  = filtered.filter(i => i.status === 'blocker').length;
   const solved   = filtered.filter(i => i.status === 'solved').length;
+  const p1P      = filtered.filter(i => i.priority === 'priority_1').length;
   const highP    = filtered.filter(i => i.priority === 'high').length;
   const medP     = filtered.filter(i => i.priority === 'medium').length;
   const lowP     = filtered.filter(i => i.priority === 'low').length;
@@ -2958,6 +2967,7 @@ function renderInsightsTodos() {
     <div class="stat-card yellow"><span class="stat-label">Waiting For</span><span class="stat-value">${waiting}</span></div>
     <div class="stat-card red"><span class="stat-label">Blocked</span><span class="stat-value">${blocker}</span></div>
     <div class="stat-card green"><span class="stat-label">Complete</span><span class="stat-value">${solved}</span></div>
+    <div class="stat-card" style="--stat-color:#ff1493"><span class="stat-label">Priority 1</span><span class="stat-value" style="color:#ff1493">${p1P}</span></div>
     <div class="stat-card red"><span class="stat-label">High Priority</span><span class="stat-value">${highP}</span></div>
   `;
 
@@ -2975,10 +2985,10 @@ function renderInsightsTodos() {
   destroyChart('todos-priority');
   state.insightCharts['todos-priority'] = new Chart(qs('#chart-todos-priority').getContext('2d'), {
     type: 'bar',
-    data: { labels: ['High', 'Medium', 'Low'],
-      datasets: [{ label: 'To-Dos', data: [highP, medP, lowP],
-        backgroundColor: ['#ef4444', '#f59e0b', '#2a2a3d'],
-        hoverBackgroundColor: ['#f87171', '#fbbf24', '#3a3a55'], borderRadius: 6, borderSkipped: false }] },
+    data: { labels: ['Priority 1', 'High', 'Medium', 'Low'],
+      datasets: [{ label: 'To-Dos', data: [p1P, highP, medP, lowP],
+        backgroundColor: ['#ff1493', '#ef4444', '#f59e0b', '#2a2a3d'],
+        hoverBackgroundColor: ['#ff5cb1', '#f87171', '#fbbf24', '#3a3a55'], borderRadius: 6, borderSkipped: false }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
       scales: { x: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0' } },
                 y: { grid: { color: '#2e2e42' }, ticks: { color: '#9494b0', precision: 0 }, beginAtZero: true } } },
@@ -3342,7 +3352,7 @@ function renderCommitmentList(commits, withToggle) {
       ? `<button class="stella-check" data-toggle-commit="${c.id}" data-done="${done ? '1' : '0'}" aria-label="${done ? 'Mark open' : 'Mark done'}">${done ? '✓' : ''}</button>`
       : `<span class="stella-check-static">${done ? '✓' : '○'}</span>`;
     const due = c.due_date ? `<span class="stella-commit-meta">${formatDateShort(c.due_date)}</span>` : '';
-    const pri = c.priority && c.priority !== 'medium' ? `<span class="stella-badge pri-${c.priority}">${c.priority}</span>` : '';
+    const pri = c.priority && c.priority !== 'medium' ? `<span class="stella-badge pri-${c.priority}">${issuePriorityLabel(c.priority)}</span>` : '';
     return `<div class="${cls}">${toggle}<div class="stella-commit-title">${esc(c.title)}</div>${pri}${due}</div>`;
   });
   return rows.join('');

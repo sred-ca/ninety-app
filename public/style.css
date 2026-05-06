@@ -358,6 +358,7 @@ body {
 .badge-blocker     { background: var(--red-bg);    color: var(--red); }
 .badge-solved      { background: var(--green-bg);  color: var(--green); }
 
+.badge-priority_1 { background: rgba(255,20,147,0.12); color: #ff1493; }
 .badge-high   { background: var(--red-bg);    color: var(--red); }
 .badge-medium { background: var(--yellow-bg); color: var(--yellow); }
 .badge-low    { background: var(--surface3);  color: var(--text2); }
@@ -556,6 +557,7 @@ body {
   margin-top: 5px;
   flex-shrink: 0;
 }
+.issue-priority-dot.priority_1 { background: #ff1493; }
 .issue-priority-dot.high   { background: var(--red); }
 .issue-priority-dot.medium { background: var(--yellow); }
 .issue-priority-dot.low    { background: var(--text2); }
@@ -2715,6 +2717,7 @@ textarea { resize: vertical; min-height: 72px; }
   font-size: 10px; padding: 2px 8px; border-radius: 999px;
   text-transform: uppercase; letter-spacing: 0.3px; font-weight: 600;
 }
+.stella-badge.pri-priority_1 { background: rgba(255,20,147,0.12); color: #ff1493; }
 .stella-badge.pri-high { background: var(--red-bg); color: var(--red); }
 .stella-badge.pri-low  { background: var(--blue-bg); color: var(--blue); }
 

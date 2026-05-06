@@ -841,6 +841,21 @@ if (USE_PG) {
       );
       return issueQueries.getById(id);
     },
+    hasActivePriority1: async (ownerId, excludeIssueId) => {
+      const params = excludeIssueId ? [ownerId, excludeIssueId] : [ownerId];
+      const idClause = excludeIssueId ? 'AND id <> $2' : '';
+      const { rows } = await pool.query(
+        `SELECT 1 FROM issues
+           WHERE owner_id=$1
+             AND priority='priority_1'
+             AND status <> 'solved'
+             AND archived = FALSE
+             ${idClause}
+           LIMIT 1`,
+        params
+      );
+      return rows.length > 0;
+    },
     delete: async (id) => pool.query('DELETE FROM issues WHERE id=$1', [id]),
   };
 
@@ -1913,6 +1928,16 @@ if (USE_PG) {
       ['title','description','owner_id','status','priority','archived','private','due_date','rock_id'].forEach(k => { if (k in fields) i[k] = fields[k]; });
       if ('owner_id' in fields && fields.owner_id) i.owner_id = +fields.owner_id;
       i.updated_at = nowStr(); persist(db); return enrichIssue(i);
+    },
+    hasActivePriority1: async (ownerId, excludeIssueId) => {
+      const oid = +ownerId;
+      return db.issues.some(i =>
+        i.owner_id === oid
+        && i.priority === 'priority_1'
+        && i.status !== 'solved'
+        && !i.archived
+        && (excludeIssueId == null || i.id !== +excludeIssueId)
+      );
     },
     delete: async (id) => {
       db.issues = db.issues.filter(i => i.id !== +id);
