@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ninety — Team OS</title>
-  <link rel="stylesheet" href="style.css?v=26" />
+  <link rel="stylesheet" href="style.css?v=27" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 </head>
@@ -882,6 +882,33 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="rock-id" />
+
+        <!-- AI Rock Builder banner — only shown on create -->
+        <div id="rock-assist-banner" class="rock-assist-banner" hidden>
+          <div class="rock-assist-banner-text">
+            <strong>Need help shaping this rock?</strong>
+            <span>I'll ask a few short questions and draft it for you — title, description, milestones.</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="rock-assist-open">✨ Get AI help</button>
+        </div>
+
+        <!-- AI Rock Builder chat — replaces the form when active -->
+        <div id="rock-assist-view" class="rock-assist-view" hidden>
+          <div class="rock-assist-header">
+            <div class="rock-assist-title">
+              <span class="rock-assist-icon">✨</span>
+              <span>AI Rock Builder</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="rock-assist-skip">Skip the AI</button>
+          </div>
+          <div class="rock-assist-transcript" id="rock-assist-transcript"></div>
+          <div class="rock-assist-input-row">
+            <textarea id="rock-assist-input" rows="2" placeholder="Type your reply…"></textarea>
+            <button type="button" class="btn btn-primary" id="rock-assist-send">Send</button>
+          </div>
+        </div>
+
+        <div id="rock-form-fields">
         <div class="form-group">
           <label>Rock Title *</label>
           <input type="text" id="rock-title" placeholder="What needs to be accomplished this quarter?" />
@@ -939,6 +966,7 @@
             Add Milestone
           </button>
         </div>
+        </div><!-- /#rock-form-fields -->
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" data-modal="rock-modal">Cancel</button>
@@ -1126,6 +1154,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=27"></script>
 </body>
 </html>

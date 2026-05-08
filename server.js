@@ -1176,6 +1176,148 @@ app.delete('/api/rocks/:id', wrap(async (req, res) => {
   ok(res, { deleted: true });
 }));
 
+// ── AI Rock Builder ──────────────────────────────────────────────────────────
+// Coaches a user through 5-7 plain-English questions, then synthesizes a
+// well-shaped Rock (title, description, goal link, 4-6 dated milestones).
+// Used at create time only. Hard-capped at 10 user turns. Goal list is the
+// only company context sent to Anthropic.
+const ROCK_ASSIST_TURN_CAP = 10;
+const ROCK_ASSIST_MODEL = 'claude-opus-4-7';
+
+function buildRockAssistSystem(goals, today) {
+  const visible = (goals || []).filter(g => !g.archived);
+  const goalsBlock = visible.length
+    ? 'Annual goals this rock could link to:\n' +
+      visible.map(g => `  - id="${g.id || ''}" — ${(g.text || '').trim()}`).join('\n')
+    : '(No annual goals defined yet — the user can still create a rock without linking.)';
+
+  return `You are an EOS rock-building expert helping someone shape a well-formed quarterly Rock.
+
+Your job: ask short, plain-English questions one at a time, then synthesize the answers into a tight Rock with milestones.
+
+Today's date: ${today}
+
+Ask these in order. Skip any question whose answer is already obvious from earlier replies.
+
+  1. What are you trying to get done this quarter?
+  2. How will you know when it's done?
+  3. When does it need to be finished?
+  4. Does this rock connect to one of your annual goals? (When asking THIS question, append the literal token [GOALS_LIST] at the very end of your message — the UI replaces it with a clickable goal list.)
+  5. What are the main steps to get there?
+  6. What could slow you down or block you?
+  7. Anything else you want to add before I draft this up?
+
+${goalsBlock}
+
+GUIDELINES
+- Use plain English. Avoid EOS jargon ("derailers", "DOD", "OKR", "north star").
+- One question per turn. Don't bundle. Keep responses to 1-2 sentences plus the next question.
+- If an answer is vague, ask ONE short clarifying follow-up, then move on.
+- Don't lecture or over-coach. You're a draftsman, not a therapist.
+- After question 7 (or sooner if the user has nothing to add), output a SYNTHESIS block.
+
+SYNTHESIS FORMAT
+End your final message with a single fenced block exactly like:
+
+<rock>
+{
+  "title": "concise rock title under 10 words",
+  "description": "1-3 sentence description with the concrete outcome and how we'll know it's done",
+  "goal_id": "g_xxx",
+  "milestones": [
+    { "title": "first chunk", "due_date": "YYYY-MM-DD" },
+    { "title": "second chunk", "due_date": "YYYY-MM-DD" }
+  ]
+}
+</rock>
+
+Aim for 4-6 milestones paced across the time available. The final milestone date should equal the rock's deadline. Use ISO YYYY-MM-DD dates. If there's no goal link, set "goal_id": null.`;
+}
+
+app.post('/api/rocks/assist', wrap(async (req, res) => {
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  const userTurns = messages.filter(m => m && m.role === 'user').length;
+  if (userTurns > ROCK_ASSIST_TURN_CAP) {
+    return fail(res, 'Conversation too long — please save what you have or skip the AI.', 400);
+  }
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return fail(res, 'AI assistant is not configured (missing ANTHROPIC_API_KEY).', 503);
+
+  const vto = await vtoQueries.getOrCreate();
+  const goals = vto.one_year_goals || [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  const cleanMessages = messages
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .map(m => ({ role: m.role, content: m.content }));
+
+  // Cold start — return the opening question without calling Anthropic.
+  if (cleanMessages.length === 0) {
+    return ok(res, {
+      message: "Let's shape this rock together. What are you trying to get done this quarter?",
+      done: false,
+      showGoals: false,
+    });
+  }
+
+  let raw;
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ROCK_ASSIST_MODEL,
+        max_tokens: 1500,
+        system: buildRockAssistSystem(goals, today),
+        messages: cleanMessages,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('rock-assist anthropic error:', resp.status, errText.slice(0, 500));
+      return fail(res, 'AI service error', 502);
+    }
+    raw = await resp.json();
+  } catch (e) {
+    console.error('rock-assist fetch error:', e);
+    return fail(res, 'AI service unreachable', 502);
+  }
+
+  const text = (raw.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+
+  // Detect synthesis: <rock>{...}</rock> JSON block.
+  const synth = text.match(/<rock>\s*(\{[\s\S]*?\})\s*<\/rock>/);
+  let rock = null;
+  let cleanText = text;
+  if (synth) {
+    try {
+      rock = JSON.parse(synth[1]);
+      cleanText = text.replace(synth[0], '').trim();
+      // Drop bogus goal_ids that don't exist on the user's V/TO.
+      if (rock.goal_id && !goals.some(g => g.id === rock.goal_id)) rock.goal_id = null;
+    } catch (e) {
+      console.error('rock-assist JSON parse error:', e, synth[1].slice(0, 300));
+    }
+  }
+
+  const showGoals = /\[GOALS_LIST\]/.test(cleanText);
+  cleanText = cleanText.replace(/\[GOALS_LIST\]/g, '').trim();
+
+  ok(res, {
+    message: cleanText || (rock ? "Here's a draft based on what we discussed:" : ''),
+    done: !!rock,
+    rock,
+    showGoals,
+    goals: showGoals
+      ? goals.filter(g => !g.archived).map(g => ({ id: g.id, text: g.text }))
+      : undefined,
+  });
+}));
+
 // ── Rock milestones ──────────────────────────────────────────────────────────
 app.get('/api/rocks/:rockId/milestones', wrap(async (req, res) => {
   ok(res, await milestoneQueries.getByRock(req.params.rockId));

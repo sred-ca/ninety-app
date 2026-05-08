@@ -3480,3 +3480,208 @@ textarea { resize: vertical; min-height: 72px; }
   /* Owner multiselect button — let it shrink to its label width. */
   .owner-multiselect-btn { padding: 5px 10px; font-size: 12px; }
 }
+
+/* ── AI Rock Builder ──────────────────────────────────────────────────────
+   Banner (offered above the form on rock create), chat view (replaces the
+   form during the conversation), and the AI-milestone preview rendered
+   pre-save.
+   ───────────────────────────────────────────────────────────────────────── */
+.rock-assist-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+}
+.rock-assist-banner-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rock-assist-banner-text strong {
+  font-size: 13px;
+  color: #5b21b6;
+}
+.rock-assist-banner-text span {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.rock-assist-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 60vh;
+  min-height: 400px;
+}
+.rock-assist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+  border-radius: 8px;
+}
+.rock-assist-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5b21b6;
+}
+.rock-assist-icon { font-size: 16px; }
+
+.rock-assist-transcript {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.assist-turn {
+  display: flex;
+  max-width: 85%;
+}
+.assist-turn-user {
+  align-self: flex-end;
+}
+.assist-turn-assistant {
+  align-self: flex-start;
+}
+.assist-bubble {
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.assist-turn-user .assist-bubble {
+  background: #4f46e5;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.assist-turn-assistant .assist-bubble {
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-bottom-left-radius: 4px;
+}
+
+.assist-thinking .assist-bubble { padding: 12px 14px; }
+.assist-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.assist-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  animation: assist-dot-bounce 1.2s infinite ease-in-out;
+}
+.assist-dots span:nth-child(2) { animation-delay: 0.15s; }
+.assist-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes assist-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.assist-goal-chips {
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 95%;
+  margin-top: -2px;
+}
+.assist-goal-chip {
+  padding: 7px 12px;
+  background: #fff;
+  border: 1px solid #c4b5fd;
+  border-radius: 999px;
+  color: #5b21b6;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.assist-goal-chip:hover {
+  background: #f5f3ff;
+  border-color: #8b5cf6;
+}
+.assist-goal-chip-none {
+  border-color: #d1d5db;
+  color: #6b7280;
+}
+.assist-goal-chip-none:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.rock-assist-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.rock-assist-input-row textarea {
+  flex: 1;
+  resize: none;
+  padding: 9px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.rock-assist-input-row textarea:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+}
+.rock-assist-input-row .btn { align-self: flex-end; }
+
+/* AI-generated milestone preview — read-only rows shown before the user
+   clicks Save. Once saved, the standard milestone editor takes over. */
+.milestone-row.assist-preview {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  background: #fafafa;
+  border: 1px dashed #d1d5db;
+}
+.assist-preview-num {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b5cf6;
+  text-align: center;
+}
+.assist-preview-title {
+  font-size: 13px;
+  color: #1f2937;
+}
+.assist-preview-date {
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.assist-preview-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+}

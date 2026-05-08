@@ -459,6 +459,15 @@ function openRockModal(editId, prefill = {}) {
   const rock = editId ? state.rocks.find(r => r.id === editId) : null;
   qs('#rock-modal-title').textContent = rock ? 'Edit Rock' : (prefill.titlePrefix || 'Add Rock');
   qs('#rock-id').value = rock ? rock.id : '';
+
+  // AI Rock Builder is offered on create only. Reset chat state every open.
+  state.assistMessages = [];
+  state.assistPendingMilestones = [];
+  qs('#rock-assist-banner').hidden = !!rock;
+  qs('#rock-assist-view').hidden = true;
+  qs('#rock-form-fields').hidden = false;
+  qs('#rock-assist-transcript').innerHTML = '';
+  qs('#rock-assist-input').value = '';
   qs('#rock-title').value = rock ? rock.title : '';
   qs('#rock-description').value = rock ? (rock.description || '') : '';
   qs('#rock-status').value = rock ? rock.status : 'not_started';
@@ -640,16 +649,204 @@ qs('#save-rock-btn').addEventListener('click', async () => {
   }
   if (!body.title) { qs('#rock-title').focus(); return; }
   try {
+    let savedRock;
     if (id) {
-      await api.put(`/api/rocks/${id}`, body);
+      savedRock = await api.put(`/api/rocks/${id}`, body);
     } else {
-      await api.post('/api/rocks', body);
+      savedRock = await api.post('/api/rocks', body);
+      // If the AI assistant produced milestones, persist them now that we
+      // have a rock_id. Failures are surfaced but don't block the save.
+      const pending = state.assistPendingMilestones || [];
+      if (savedRock?.id && pending.length) {
+        for (let i = 0; i < pending.length; i++) {
+          const m = pending[i];
+          try {
+            await api.post(`/api/rocks/${savedRock.id}/milestones`, {
+              title: m.title,
+              due_date: m.due_date || null,
+              owner_id: body.owner_id || null,
+              sort_order: i,
+            });
+          } catch (e) { console.error('milestone save failed:', m, e); }
+        }
+        state.assistPendingMilestones = [];
+      }
     }
     closeModal('rock-modal');
     loadRocks();
     // If the Goals tab is the active view, refresh its rock-keyed render too.
     if (qs('#view-goals')?.classList.contains('active')) loadGoals();
   } catch (e) { alert(e.message); }
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   AI ROCK BUILDER — short coaching chat that shapes a rock for the user.
+   Plumbed through POST /api/rocks/assist (Anthropic-backed). The chat
+   state lives in state.assistMessages; on synthesis we apply the AI's
+   draft to the form fields and stash milestones for save-time creation.
+   ════════════════════════════════════════════════════════════════════ */
+
+function appendAssistTurn(role, text) {
+  const wrap = document.createElement('div');
+  wrap.className = `assist-turn assist-turn-${role}`;
+  wrap.innerHTML = `
+    <div class="assist-bubble">${esc(text).replace(/\n/g, '<br>')}</div>
+  `;
+  qs('#rock-assist-transcript').appendChild(wrap);
+  const t = qs('#rock-assist-transcript');
+  t.scrollTop = t.scrollHeight;
+  return wrap;
+}
+
+function appendAssistThinking() {
+  const wrap = document.createElement('div');
+  wrap.className = 'assist-turn assist-turn-assistant assist-thinking';
+  wrap.innerHTML = `<div class="assist-bubble"><span class="assist-dots"><span></span><span></span><span></span></span></div>`;
+  qs('#rock-assist-transcript').appendChild(wrap);
+  const t = qs('#rock-assist-transcript');
+  t.scrollTop = t.scrollHeight;
+  return wrap;
+}
+
+function renderGoalChips(goals) {
+  const wrap = document.createElement('div');
+  wrap.className = 'assist-goal-chips';
+  if (!goals || goals.length === 0) {
+    wrap.innerHTML = `<button type="button" class="assist-goal-chip assist-goal-chip-none">No annual goals yet — skip</button>`;
+  } else {
+    wrap.innerHTML = goals.map((g, i) =>
+      `<button type="button" class="assist-goal-chip" data-goal-id="${esc(g.id || '')}" data-goal-text="${esc(g.text || '')}">${i + 1}. ${esc((g.text || '').slice(0, 80))}</button>`
+    ).join('') +
+    `<button type="button" class="assist-goal-chip assist-goal-chip-none" data-goal-id="">No goal — this rock stands alone</button>`;
+  }
+  wrap.querySelectorAll('.assist-goal-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const goalId = btn.getAttribute('data-goal-id') || '';
+      const goalText = btn.getAttribute('data-goal-text') || '';
+      const reply = goalId
+        ? `Yes, link it to: ${goalText} (id: ${goalId})`
+        : `No, this rock isn't linked to an annual goal.`;
+      sendAssistTurn(reply);
+    });
+  });
+  qs('#rock-assist-transcript').appendChild(wrap);
+  const t = qs('#rock-assist-transcript');
+  t.scrollTop = t.scrollHeight;
+}
+
+async function sendAssistTurn(userText) {
+  const text = (userText || '').trim();
+  // The very first call is a cold-start prime: we send messages=[] and
+  // the server hands back the opening question.
+  const isPrime = !text && state.assistMessages.length === 0;
+  if (!isPrime && !text) return;
+
+  if (text) {
+    appendAssistTurn('user', text);
+    state.assistMessages.push({ role: 'user', content: text });
+    qs('#rock-assist-input').value = '';
+  }
+
+  qs('#rock-assist-send').disabled = true;
+  qs('#rock-assist-input').disabled = true;
+  const thinking = appendAssistThinking();
+
+  let resp;
+  try {
+    resp = await api.post('/api/rocks/assist', { messages: state.assistMessages });
+  } catch (e) {
+    thinking.remove();
+    appendAssistTurn('assistant', `Sorry — the assistant hit a snag: ${e.message}. You can keep typing or hit "Skip the AI" to fill the form yourself.`);
+    qs('#rock-assist-send').disabled = false;
+    qs('#rock-assist-input').disabled = false;
+    qs('#rock-assist-input').focus();
+    return;
+  }
+  thinking.remove();
+
+  const aiText = resp.message || '';
+  if (aiText) {
+    appendAssistTurn('assistant', aiText);
+    state.assistMessages.push({ role: 'assistant', content: aiText });
+  }
+  if (resp.showGoals) renderGoalChips(resp.goals || []);
+
+  if (resp.done && resp.rock) {
+    applyAssistDraft(resp.rock);
+  } else {
+    qs('#rock-assist-send').disabled = false;
+    qs('#rock-assist-input').disabled = false;
+    qs('#rock-assist-input').focus();
+  }
+}
+
+function applyAssistDraft(rock) {
+  qs('#rock-title').value = (rock.title || '').slice(0, 200);
+  qs('#rock-description').value = rock.description || '';
+  if (rock.goal_id) {
+    const goalSel = qs('#rock-goal');
+    if ([...goalSel.options].some(o => o.value === rock.goal_id)) {
+      goalSel.value = rock.goal_id;
+    }
+  }
+  state.assistPendingMilestones = Array.isArray(rock.milestones) ? rock.milestones : [];
+
+  // Switch back to the form view, keep banner hidden (chat already happened).
+  qs('#rock-assist-view').hidden = true;
+  qs('#rock-form-fields').hidden = false;
+  qs('#rock-assist-banner').hidden = true;
+
+  // Render a compact preview of the AI's milestones so the user sees them
+  // before saving. They'll be persisted on save-rock click.
+  renderAssistMilestonePreview();
+  qs('#rock-title').focus();
+}
+
+function renderAssistMilestonePreview() {
+  const ms = state.assistPendingMilestones || [];
+  // Reuse the milestones-section container as a read-only preview pre-save.
+  const sec = qs('#milestones-section');
+  if (!ms.length) { sec.hidden = true; return; }
+  sec.hidden = false;
+  qs('#milestones-count').textContent = String(ms.length);
+  const list = qs('#milestones-list');
+  list.innerHTML = ms.map((m, i) => `
+    <div class="milestone-row assist-preview">
+      <span class="assist-preview-num">${i + 1}</span>
+      <span class="assist-preview-title">${esc(m.title || '')}</span>
+      <span class="assist-preview-date">${esc(m.due_date || '')}</span>
+    </div>
+  `).join('') + `<p class="assist-preview-hint">These will be created when you save the rock. You can edit them after.</p>`;
+  // Hide the "Add Milestone" button — pre-save we don't have a rock_id.
+  qs('#add-milestone-btn').hidden = true;
+}
+
+qs('#rock-assist-open').addEventListener('click', () => {
+  qs('#rock-assist-banner').hidden = true;
+  qs('#rock-form-fields').hidden = true;
+  qs('#rock-assist-view').hidden = false;
+  qs('#rock-assist-transcript').innerHTML = '';
+  state.assistMessages = [];
+  sendAssistTurn(''); // prime — server returns the opening question
+});
+
+qs('#rock-assist-skip').addEventListener('click', () => {
+  qs('#rock-assist-view').hidden = true;
+  qs('#rock-form-fields').hidden = false;
+  qs('#rock-assist-banner').hidden = false;
+  state.assistMessages = [];
+  state.assistPendingMilestones = [];
+});
+
+qs('#rock-assist-send').addEventListener('click', () => {
+  sendAssistTurn(qs('#rock-assist-input').value);
+});
+
+qs('#rock-assist-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendAssistTurn(qs('#rock-assist-input').value);
+  }
 });
 
 /* ════════════════════════════════════════════════════════════════════
