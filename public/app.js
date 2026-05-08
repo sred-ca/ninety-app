@@ -1047,12 +1047,13 @@ function renderIssues() {
     });
   }
 
-  // Stats: exclude archived from counts; Total = all open (non-solved)
+  // Stats: exclude archived from open-status counts; Complete includes archived
+  // (archived solved to-dos are still "complete" — they were just hidden)
   const activeIssues = inScope.filter(i => !i.archived);
   const inProgress = activeIssues.filter(i => i.status === 'in_progress').length;
   const waitingFor = activeIssues.filter(i => i.status === 'waiting_for').length;
   const blockers   = activeIssues.filter(i => i.status === 'blocker').length;
-  const solved     = activeIssues.filter(i => i.status === 'solved').length;
+  const solved     = inScope.filter(i => i.status === 'solved').length;
   const total      = inProgress + waitingFor + blockers;
   qs('#issues-stats').innerHTML = `
     <div class="stat-card"><span class="stat-label">Total Open</span><span class="stat-value">${total}</span></div>
