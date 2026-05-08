@@ -3486,6 +3486,12 @@ textarea { resize: vertical; min-height: 72px; }
    form during the conversation), and the AI-milestone preview rendered
    pre-save.
    ───────────────────────────────────────────────────────────────────────── */
+/* The hidden HTML attribute uses [hidden] { display:none } from the UA
+   stylesheet, but our class-level display:flex below would override it.
+   Force these elements to honor hidden. */
+.rock-assist-banner[hidden],
+.rock-assist-view[hidden] { display: none !important; }
+
 .rock-assist-banner {
   display: flex;
   align-items: center;
