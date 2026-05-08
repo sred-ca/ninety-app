@@ -467,6 +467,20 @@ app.post('/api/admin/team-issues', requireAdminKey, wrap(async (req, res) => {
   ok(res, await teamIssueQueries.create({ title, description, owner_id, horizon }));
 }));
 
+// Admin list issues by owner (admin-key auth). Returns ALL issues for the
+// given owner, ignoring privacy — admin tooling runs with full visibility.
+app.get('/api/admin/issues', requireAdminKey, wrap(async (req, res) => {
+  const ownerId = +req.query.owner_id;
+  if (!ownerId) return fail(res, 'owner_id is required');
+  ok(res, await issueQueries.listByOwner(ownerId));
+}));
+
+// Admin update issue (admin-key auth). Mirrors PUT /api/issues/:id but skips
+// the session check — used for bulk cleanups / external tooling.
+app.put('/api/admin/issues/:id', requireAdminKey, wrap(async (req, res) => {
+  ok(res, await issueQueries.update(req.params.id, req.body || {}));
+}));
+
 // Pre-call builder pushes each user's rendered Stella system prompt here.
 // The prompt is a single string (the full system message), built per-user
 // from their markdown journal / commitments / wins / themes / personality.

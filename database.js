@@ -857,6 +857,15 @@ if (USE_PG) {
       return rows.length > 0;
     },
     delete: async (id) => pool.query('DELETE FROM issues WHERE id=$1', [id]),
+    // Admin-scoped listing — returns all issues for a single owner regardless
+    // of privacy. Used by tooling that runs with admin key, not session auth.
+    listByOwner: async (owner_id) => {
+      const { rows } = await pool.query(
+        `${ISSUE_Q} WHERE i.owner_id=$1 ORDER BY i.created_at DESC`,
+        [owner_id]
+      );
+      return rows;
+    },
   };
 
   const agendaQueries = {
@@ -1942,6 +1951,13 @@ if (USE_PG) {
     delete: async (id) => {
       db.issues = db.issues.filter(i => i.id !== +id);
       persist(db);
+    },
+    listByOwner: async (owner_id) => {
+      const uid = +owner_id;
+      return db.issues
+        .filter(i => i.owner_id === uid)
+        .map(enrichIssue)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
   };
 
