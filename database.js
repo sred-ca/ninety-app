@@ -1712,7 +1712,8 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries };
+  // Test-only no-op in PG mode — tests run against the JSON fallback.
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {} };
 
 } else {
 
@@ -1722,10 +1723,11 @@ if (USE_PG) {
 
   const fs   = require('fs');
   const path = require('path');
-  // Use /tmp on serverless (read-only app dir), fall back to __dirname locally
-  const DATA_FILE = process.env.VERCEL
-    ? '/tmp/ninety-data.json'
-    : path.join(__dirname, 'data.json');
+  // DATA_FILE env-var wins (tests use this for isolation). Otherwise: /tmp on
+  // serverless (read-only app dir), fall back to __dirname locally.
+  const DATA_FILE = process.env.DATA_FILE
+    ? process.env.DATA_FILE
+    : (process.env.VERCEL ? '/tmp/ninety-data.json' : path.join(__dirname, 'data.json'));
 
   const SEED = {
     _seq: { users: 5, rocks: 0, issues: 0 },
@@ -2746,5 +2748,17 @@ if (USE_PG) {
     },
   };
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries };
+  // Test-only: wipe all rows except the seeded users so each test starts
+  // clean. No-op in Postgres mode (tests use the JSON fallback).
+  function __resetForTests() {
+    for (const key of Object.keys(db)) {
+      if (key === 'users' || key === '_seq') continue;
+      if (Array.isArray(db[key])) db[key] = [];
+      else if (db[key] && typeof db[key] === 'object') db[key] = null;
+    }
+    db._seq = { ...db._seq, rocks: 0, issues: 0 };
+    persist(db);
+  }
+
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests };
 }

@@ -94,11 +94,6 @@ const api = {
 function qs(sel) { return document.querySelector(sel); }
 function qsa(sel) { return [...document.querySelectorAll(sel)]; }
 
-function initials(name) {
-  if (!name) return '?';
-  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-}
-
 function avatar(name, picture, color, size = 28) {
   const el = document.createElement('div');
   el.className = 'avatar';
@@ -124,105 +119,11 @@ function avatar(name, picture, color, size = 28) {
   return el;
 }
 
-const ISSUE_STATUS_LABELS = {
-  in_progress: 'In Progress',
-  waiting_for: 'Waiting For',
-  blocker:     'Blocked',
-  solved:      'Complete',
-};
-function issueStatusLabel(s) { return ISSUE_STATUS_LABELS[s] || s.replace(/_/g, ' '); }
-
-const ISSUE_PRIORITY_LABELS = {
-  priority_1: 'Priority 1',
-  high:       'high',
-  medium:     'medium',
-  low:        'low',
-};
-function issuePriorityLabel(p) { return ISSUE_PRIORITY_LABELS[p] || (p || '').replace(/_/g, ' '); }
-
 function badge(text, cls) {
   const el = document.createElement('span');
   el.className = `badge badge-${cls}`;
   el.textContent = text.replace('_', ' ');
   return el;
-}
-
-function quarters() {
-  const now = new Date();
-  const y = now.getFullYear();
-  return [`Q4 ${y}`, `Q3 ${y}`, `Q2 ${y}`, `Q1 ${y}`];
-}
-
-function currentQuarter() {
-  const now = new Date();
-  return `Q${Math.ceil((now.getMonth() + 1) / 3)} ${now.getFullYear()}`;
-}
-
-function periodDateRange(period) {
-  const now = new Date();
-  const y = now.getFullYear();
-  const q = Math.ceil((now.getMonth() + 1) / 3);
-  const qStart = (qn, yr) => new Date(yr, (qn - 1) * 3, 1);
-  const qEnd   = (qn, yr) => new Date(yr, qn * 3, 0, 23, 59, 59, 999);
-  if (period === 'current') return { start: qStart(q, y), end: qEnd(q, y) };
-  if (period === 'last') {
-    const lq = q === 1 ? 4 : q - 1;
-    const ly = q === 1 ? y - 1 : y;
-    return { start: qStart(lq, ly), end: qEnd(lq, ly) };
-  }
-  return { start: new Date(0), end: new Date(9999, 0) };
-}
-
-/* Guard a click handler so a fast double-click can't fire its async body
-   twice. Disables the button for the duration of the async work, re-enables
-   on settle. Use sparingly — only on confirm/create handlers where a
-   duplicate POST has user-visible consequences. */
-function withClickGuard(fn) {
-  return async function (e) {
-    const btn = e && e.currentTarget;
-    if (btn && btn.disabled) return;
-    if (btn) btn.disabled = true;
-    try { await fn.call(this, e); }
-    finally { if (btn) btn.disabled = false; }
-  };
-}
-
-/* Add N business days to today, return YYYY-MM-DD string */
-function addBusinessDays(n) {
-  const d = new Date();
-  let added = 0;
-  while (added < n) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) added++;
-  }
-  // Use local-tz formatting so the resulting due date matches what the user
-  // sees in their calendar — toISOString() shifts by ±1 day off-UTC.
-  return localDateISO(d);
-}
-
-/* Format a YYYY-MM-DD due date for display; returns {text, urgency} */
-// Build YYYY-MM-DD in the user's local timezone. Using `.toISOString()` for
-// "today" silently shifts by ±1 day in any timezone east or west of UTC —
-// so a to-do due May 1 in Mountain time would read "Tomorrow" all evening
-// on Apr 30. Always compare local-to-local.
-function localDateISO(d = new Date()) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function formatDueDate(dateStr) {
-  if (!dateStr) return null;
-  const today = localDateISO();
-  const due   = dateStr.slice(0, 10);
-  const [y, m, d] = due.split('-').map(Number);
-  // Format as "Apr 15"
-  const label = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  if (due < today)  return { text: label, urgency: 'overdue' };
-  if (due === today) return { text: 'Today', urgency: 'today' };
-  // Check if tomorrow
-  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-  if (due === localDateISO(tomorrow)) return { text: 'Tomorrow', urgency: 'soon' };
-  return { text: label, urgency: 'normal' };
 }
 
 function openModal(id) { qs(`#${id}`).classList.add('active'); }

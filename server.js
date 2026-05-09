@@ -1534,3 +1534,5 @@ if (require.main === module) {
 }
 
 module.exports = app;
+module.exports.makeAuthCookie = makeAuthCookie; // re-exported for tests
+module.exports.dbReady = dbReady;
