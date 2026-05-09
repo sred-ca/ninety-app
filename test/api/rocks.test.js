@@ -122,6 +122,22 @@ test('PUT /api/rocks/:id — progress=200 stored as-is (route does NOT clamp)', 
   assert.equal(res.body.data.progress, 200);
 });
 
+test('rock status — each STATUS_ROCK value round-trips on PUT', async () => {
+  // Tests that the validator accepts every documented value. Catches enum
+  // drift if STATUS_ROCK is changed in server.js but the API contract isn't.
+  const created = await request(app)
+    .post('/api/rocks')
+    .set('Cookie', asUser(ALICE))
+    .send({ title: 'X', quarter: 'Q1 2026' });
+  const id = created.body.data.id;
+  for (const status of ['not_started', 'on_track', 'off_track', 'done']) {
+    const res = await request(app)
+      .put(`/api/rocks/${id}`).set('Cookie', asUser(ALICE)).send({ status });
+    assert.equal(res.status, 200, `status ${status} must round-trip`);
+    assert.equal(res.body.data.status, status);
+  }
+});
+
 test('DELETE /api/rocks/:id cascades to milestones', async () => {
   const rock = await request(app)
     .post('/api/rocks')
