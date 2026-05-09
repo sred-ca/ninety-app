@@ -1713,7 +1713,7 @@ if (USE_PG) {
   };
 
   // Test-only no-op in PG mode — tests run against the JSON fallback.
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {} };
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {}, __encryptToken: encryptToken, __decryptToken: decryptToken };
 
 } else {
 
@@ -2752,13 +2752,20 @@ if (USE_PG) {
   // clean. No-op in Postgres mode (tests use the JSON fallback).
   function __resetForTests() {
     for (const key of Object.keys(db)) {
-      if (key === 'users' || key === '_seq') continue;
+      if (key === '_seq') continue;
       if (Array.isArray(db[key])) db[key] = [];
       else if (db[key] && typeof db[key] === 'object') db[key] = null;
     }
-    db._seq = { ...db._seq, rocks: 0, issues: 0 };
+    // Reseed the users so tests that mutate roles / create users don't pollute
+    // the next test. Mirror the boot-time backfill so Logan stays an owner.
+    db.users = JSON.parse(JSON.stringify(SEED.users));
+    db.users.forEach(u => {
+      if (!u.role) u.role = 'member';
+      if (OWNER_EMAILS.has(u.email) || OWNER_NAMES.has(u.name)) u.role = 'owner';
+    });
+    db._seq = { users: 5, rocks: 0, issues: 0 };
     persist(db);
   }
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests };
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests, __encryptToken: encryptToken, __decryptToken: decryptToken };
 }

@@ -152,6 +152,41 @@ test('archive flow — archived rows hidden by default, returned with include_ar
   assert.ok(all.body.data.find(i => i.id === created.body.data.id));
 });
 
+test('GET /api/issues?status=solved returns ALL solved (incl. archived)', async () => {
+  // The /solved tab is documented as returning archived rows too — the
+  // archive flag should NOT filter them out when filtering by status=solved.
+  const a = await createIssue(ALICE, { title: 'Solved A', owner_id: ALICE });
+  const b = await createIssue(ALICE, { title: 'Solved B archived', owner_id: ALICE });
+  await request(app).put(`/api/issues/${a.body.data.id}`).set('Cookie', asUser(ALICE)).send({ status: 'solved' });
+  await request(app).put(`/api/issues/${b.body.data.id}`).set('Cookie', asUser(ALICE)).send({ status: 'solved' });
+  await request(app).put(`/api/issues/${b.body.data.id}`).set('Cookie', asUser(ALICE)).send({ archived: true });
+
+  const res = await request(app).get('/api/issues?status=solved').set('Cookie', asUser(ALICE));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 2, 'solved tab should include archived solved rows');
+});
+
+test('GET /api/issues?status=in_progress excludes solved rows', async () => {
+  const a = await createIssue(ALICE, { title: 'Active', owner_id: ALICE });
+  const b = await createIssue(ALICE, { title: 'Done',   owner_id: ALICE });
+  await request(app).put(`/api/issues/${b.body.data.id}`).set('Cookie', asUser(ALICE)).send({ status: 'solved' });
+  const res = await request(app).get('/api/issues?status=in_progress').set('Cookie', asUser(ALICE));
+  assert.equal(res.body.data.length, 1);
+  assert.equal(res.body.data[0].title, 'Active');
+});
+
+test('GET /api/issues?include_archived accepts both "1" and "true"', async () => {
+  const created = await createIssue(ALICE, { title: 'Old', owner_id: ALICE });
+  await request(app).put(`/api/issues/${created.body.data.id}`).set('Cookie', asUser(ALICE)).send({ archived: true });
+
+  const r1 = await request(app).get('/api/issues?include_archived=1').set('Cookie', asUser(ALICE));
+  const r2 = await request(app).get('/api/issues?include_archived=true').set('Cookie', asUser(ALICE));
+  const rNo = await request(app).get('/api/issues?include_archived=no').set('Cookie', asUser(ALICE));
+  assert.equal(r1.body.data.length, 1);
+  assert.equal(r2.body.data.length, 1);
+  assert.equal(rNo.body.data.length, 0, 'arbitrary truthy strings other than "1"/"true" must NOT include archived');
+});
+
 test('DELETE /api/issues/:id removes the row', async () => {
   const created = await createIssue(ALICE, { title: 'Doomed', owner_id: ALICE });
   const id = created.body.data.id;

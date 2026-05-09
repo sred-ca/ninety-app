@@ -69,6 +69,51 @@ test('agenda sections — create, list, update, delete', async () => {
   assert.equal(del.body.data.deleted, true);
 });
 
+test('agenda sections — listed in sort_order ascending', async () => {
+  const a = await request(app)
+    .post('/api/agendas').set('Cookie', asUser(ALICE)).send({ title: 'Ordered agenda' });
+  const aid = a.body.data.id;
+
+  // Add three sections OUT of natural ordering.
+  for (const [name, sort_order] of [['Third', 30], ['First', 10], ['Second', 20]]) {
+    await request(app)
+      .post(`/api/agendas/${aid}/sections`)
+      .set('Cookie', asUser(ALICE))
+      .send({ name, duration_minutes: 5, sort_order });
+  }
+  const list = await request(app)
+    .get(`/api/agendas/${aid}/sections`)
+    .set('Cookie', asUser(ALICE));
+  assert.deepEqual(
+    list.body.data.map(s => s.name),
+    ['First', 'Second', 'Third'],
+    'sections must be returned in sort_order ascending'
+  );
+});
+
+test('agenda section update — sort_order change re-orders the list', async () => {
+  const a = await request(app)
+    .post('/api/agendas').set('Cookie', asUser(ALICE)).send({ title: 'Reorder me' });
+  const aid = a.body.data.id;
+  const s1 = await request(app)
+    .post(`/api/agendas/${aid}/sections`).set('Cookie', asUser(ALICE))
+    .send({ name: 'A', sort_order: 10 });
+  const s2 = await request(app)
+    .post(`/api/agendas/${aid}/sections`).set('Cookie', asUser(ALICE))
+    .send({ name: 'B', sort_order: 20 });
+
+  // Move B before A.
+  await request(app)
+    .put(`/api/agenda-sections/${s2.body.data.id}`)
+    .set('Cookie', asUser(ALICE))
+    .send({ sort_order: 5 });
+
+  const list = await request(app)
+    .get(`/api/agendas/${aid}/sections`)
+    .set('Cookie', asUser(ALICE));
+  assert.deepEqual(list.body.data.map(s => s.name), ['B', 'A']);
+});
+
 test('DELETE /api/agendas/:id removes the agenda', async () => {
   const a = await request(app)
     .post('/api/agendas').set('Cookie', asUser(ALICE)).send({ title: 'Gone' });
