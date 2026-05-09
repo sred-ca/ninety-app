@@ -1713,7 +1713,7 @@ if (USE_PG) {
   };
 
   // Test-only no-op in PG mode — tests run against the JSON fallback.
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {} };
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {}, __encryptToken: encryptToken, __decryptToken: decryptToken };
 
 } else {
 
@@ -2760,5 +2760,5 @@ if (USE_PG) {
     persist(db);
   }
 
-  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests };
+  module.exports = { initDb, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests, __encryptToken: encryptToken, __decryptToken: decryptToken };
 }

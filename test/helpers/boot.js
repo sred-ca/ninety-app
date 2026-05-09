@@ -24,6 +24,17 @@ delete process.env.VERCEL;
 // Stable signing secret so makeAuthCookie produces verifiable cookies.
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret-do-not-use-in-prod';
 
+// Stable secrets for the admin / cron / Anthropic gates that some tests poke.
+// Real values must be set in CI or prod via env — these defaults only matter
+// when a test asserts on the gate's behavior with a known-good token.
+process.env.NINETY_ADMIN_KEY = process.env.NINETY_ADMIN_KEY || 'test-admin-key';
+process.env.CRON_SECRET      = process.env.CRON_SECRET      || 'test-cron-secret';
+process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
+
+// 32-byte base64 key for QB token AES-GCM tests. Must decode to exactly 32 bytes.
+process.env.QBO_ENCRYPTION_KEY = process.env.QBO_ENCRYPTION_KEY
+  || 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=';
+
 // 2. Load the app. Importing server.js immediately fires initDb() and
 // captures the dbReady promise, which we re-export so tests can await it.
 const app = require('../../server.js');
