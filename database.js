@@ -1712,8 +1712,35 @@ if (USE_PG) {
     },
   };
 
-  // Test-only no-op in PG mode — tests run against the JSON fallback.
-  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests: () => {}, __encryptToken: encryptToken, __decryptToken: decryptToken };
+  // Test-only — TRUNCATE every test-scoped table back to seed state. Used by
+  // tests that boot in PG mode (DATABASE_URL set + a real Postgres available).
+  // RESTART IDENTITY resets the SERIAL sequences so created ids start at 1
+  // again, matching the JSON fallback's behavior.
+  async function __resetForTests() {
+    const tables = [
+      'user_tab_access', 'qb_connections', 'budget_cells', 'budget_lines',
+      'coaching_assistant_prompts', 'coaching_commitments', 'coaching_calls',
+      'meeting_attendees', 'meetings', 'agenda_sections', 'agendas',
+      'team_issues', 'issue_votes', 'issues', 'rock_milestones', 'rocks',
+      'vto', 'users',
+    ];
+    await pool.query(`TRUNCATE ${tables.join(', ')} RESTART IDENTITY CASCADE`);
+    // Reseed the same five users that JSON mode boots with so tests share a
+    // deterministic starting point. Logan keeps role='owner' to match the
+    // boot-time backfill in JSON mode.
+    await pool.query(
+      `INSERT INTO users (id, name, color, role) VALUES
+       (1, 'Logan',  '#6366f1', 'owner'),
+       (2, 'Alex',   '#ec4899', 'member'),
+       (3, 'Jordan', '#f59e0b', 'member'),
+       (4, 'Taylor', '#10b981', 'member'),
+       (5, 'Morgan', '#3b82f6', 'member')`
+    );
+    // Bump the users sequence past the seeded ids so the next CREATE doesn't collide.
+    await pool.query(`SELECT setval('users_id_seq', 5)`);
+  }
+
+  module.exports = { initDb, pool, userQueries, rockQueries, issueQueries, agendaQueries, meetingQueries, teamIssueQueries, milestoneQueries, coachingQueries, vtoQueries, budgetQueries, qbConnectionQueries, tabAccessQueries, __resetForTests, __encryptToken: encryptToken, __decryptToken: decryptToken };
 
 } else {
 
