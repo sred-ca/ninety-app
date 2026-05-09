@@ -77,6 +77,27 @@ test('PUT /api/meetings/:id/attendees — sets the list while upcoming', async (
   assert.equal(res.status, 200);
 });
 
+test('POST /api/meetings — sections_snapshot round-trips on the response', async () => {
+  // The snapshot is a JSONB column in PG / opaque object in JSON mode. It
+  // captures the agenda's section list at meeting-create time so future
+  // edits to the agenda don't rewrite past meetings' history.
+  const snapshot = [
+    { name: 'Headlines',    duration_minutes: 5, sort_order: 0 },
+    { name: 'IDS',          duration_minutes: 30, sort_order: 1 },
+    { name: 'Conclude',     duration_minutes: 5, sort_order: 2 },
+  ];
+  const res = await request(app)
+    .post('/api/meetings')
+    .set('Cookie', asUser(ALICE))
+    .send({ title: 'L10 with snapshot', sections_snapshot: snapshot });
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    res.body.data.sections_snapshot,
+    snapshot,
+    'sections_snapshot must round-trip exactly through the create response',
+  );
+});
+
 test('DELETE /api/meetings/:id removes the meeting', async () => {
   const m = await request(app)
     .post('/api/meetings').set('Cookie', asUser(ALICE)).send({ title: 'Gone' });

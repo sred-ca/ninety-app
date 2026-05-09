@@ -187,6 +187,20 @@ test('GET /api/issues?include_archived accepts both "1" and "true"', async () =>
   assert.equal(rNo.body.data.length, 0, 'arbitrary truthy strings other than "1"/"true" must NOT include archived');
 });
 
+test('issue status cycle — in_progress → blocker → solved → reopen to in_progress', async () => {
+  // Lock in the cycle the kanban UI relies on. If status validation ever
+  // tightens to forbid backward moves, this test should fail loudly.
+  const created = await createIssue(ALICE, { title: 'Cycle me', owner_id: ALICE });
+  const id = created.body.data.id;
+  const transitions = ['blocker', 'waiting_for', 'solved', 'in_progress'];
+  for (const status of transitions) {
+    const res = await request(app)
+      .put(`/api/issues/${id}`).set('Cookie', asUser(ALICE)).send({ status });
+    assert.equal(res.status, 200, `transition to ${status} must succeed`);
+    assert.equal(res.body.data.status, status);
+  }
+});
+
 test('DELETE /api/issues/:id removes the row', async () => {
   const created = await createIssue(ALICE, { title: 'Doomed', owner_id: ALICE });
   const id = created.body.data.id;

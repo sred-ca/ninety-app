@@ -70,6 +70,46 @@ test('PUT /api/team-issues/:id/rank — accepts a valid rank', async () => {
   assert.equal(res.status, 200);
 });
 
+test('team-issue rank — assigning rank=1 to a second row demotes the first', async () => {
+  // Documenting the contract: setRank is exclusive — only one row per rank.
+  // If this changes (e.g. ties allowed), this test will fail and prompt a
+  // deliberate update.
+  const a = await request(app)
+    .post('/api/team-issues').set('Cookie', asUser(ALICE))
+    .send({ title: 'A', horizon: 'short_term' });
+  const b = await request(app)
+    .post('/api/team-issues').set('Cookie', asUser(ALICE))
+    .send({ title: 'B', horizon: 'short_term' });
+  await request(app)
+    .put(`/api/team-issues/${a.body.data.id}/rank`).set('Cookie', asUser(ALICE))
+    .send({ rank: 1 });
+  await request(app)
+    .put(`/api/team-issues/${b.body.data.id}/rank`).set('Cookie', asUser(ALICE))
+    .send({ rank: 1 });
+  const list = await request(app)
+    .get('/api/team-issues').set('Cookie', asUser(ALICE));
+  const top1s = list.body.data.filter(i => i.top_rank === 1);
+  assert.equal(top1s.length, 1,
+    'at most one team issue may carry rank=1; assigning to a second must displace the first');
+  assert.equal(top1s[0].id, b.body.data.id, 'most recent rank=1 wins');
+});
+
+test('team-issue rank — null clears an existing rank', async () => {
+  const a = await request(app)
+    .post('/api/team-issues').set('Cookie', asUser(ALICE))
+    .send({ title: 'A', horizon: 'short_term' });
+  await request(app)
+    .put(`/api/team-issues/${a.body.data.id}/rank`).set('Cookie', asUser(ALICE))
+    .send({ rank: 2 });
+  await request(app)
+    .put(`/api/team-issues/${a.body.data.id}/rank`).set('Cookie', asUser(ALICE))
+    .send({ rank: null });
+  const list = await request(app)
+    .get('/api/team-issues').set('Cookie', asUser(ALICE));
+  const refreshed = list.body.data.find(i => i.id === a.body.data.id);
+  assert.equal(refreshed.top_rank, null);
+});
+
 test('DELETE /api/team-issues/:id removes the row', async () => {
   const created = await request(app)
     .post('/api/team-issues')
