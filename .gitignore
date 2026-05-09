@@ -5,3 +5,6 @@ data.json
 .vercel
 .claude/
 sops-staging/
+test-results/
+playwright-report/
+playwright/.cache/
