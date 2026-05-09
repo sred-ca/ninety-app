@@ -7,7 +7,8 @@
     "start": "node server.js",
     "dev": "node --env-file=.env server.js",
     "test": "node --test --test-reporter=spec",
-    "test:pg": "node --test --test-reporter=spec --test-concurrency=1 test/postgres/smoke.test.js"
+    "test:pg": "node --test --test-reporter=spec --test-concurrency=1 test/postgres/smoke.test.js",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "connect-pg-simple": "^10.0.0",
@@ -16,6 +17,7 @@
     "pg": "^8.11.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "supertest": "^7.0.0"
   }
 }
